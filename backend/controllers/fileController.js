@@ -166,7 +166,8 @@ const uploadFiles = async (req, res) => {
           s3Key,
           folderId: folderId || null,
           isEncrypted: true,
-          encryptionIV: encryptionResult.iv
+          encryptionIV: encryptionResult.iv,
+          encryptionPassword: password // Store the encryption password for later decryption
         });
 
         await fileDoc.save();
@@ -293,81 +294,176 @@ const getFiles = async (req, res) => {
   }
 };
 
-// Download/preview file
+// Download/preview file - PRODUCTION GRADE SECURE DOWNLOAD
 const downloadFile = async (req, res) => {
+  let decryptedBuffer = null;
+  
   try {
+    console.log('📥 ===== DOWNLOAD FILE REQUEST START =====');
+    
     const { fileId } = req.params;
     const { password, preview = false } = req.body;
     const userId = req.user._id;
+    const clientIp = req.ip || req.connection.remoteAddress;
 
-    if (!password) {
+    // STEP 1: Verify authentication
+    console.log('🔐 STEP 1: Verifying authentication...');
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+    console.log('✅ Authentication verified');
+
+    // STEP 2: Verify password provided
+    console.log('🔐 STEP 2: Verifying password provided...');
+    if (!password || password.trim() === '') {
       return res.status(400).json({
         success: false,
         message: 'Password required for file decryption'
       });
     }
+    console.log('✅ Password provided');
 
-    // Find file
-    const file = await File.findOne({ _id: fileId, userId, isDeleted: false });
+    // STEP 3: Verify file ownership
+    console.log('🔐 STEP 3: Verifying file ownership...');
+    const file = await File.findOne({ _id: fileId, userId, isDeleted: false }).select('+encryptionPassword');
     if (!file) {
+      console.log('❌ File not found or not owned by user');
       return res.status(404).json({
         success: false,
         message: 'File not found'
       });
     }
+    console.log(`✅ File ownership verified: ${file.originalName}`);
 
-    // Download from user's S3 bucket
-    let downloadBuffer;
+    // STEP 4: Retrieve encrypted file from S3
+    console.log('📥 STEP 4: Retrieving encrypted file from AWS S3...');
+    let s3Result;
     try {
-      const downloadResult = await downloadFromUserS3(userId, file.s3Key);
-      if (!downloadResult.success) {
+      s3Result = await downloadFromUserS3(userId, file.s3Key);
+      
+      console.log('📥 S3 Result:', {
+        success: s3Result?.success,
+        hasBuffer: !!s3Result?.fileBuffer,
+        bufferLength: s3Result?.fileBuffer?.length,
+        error: s3Result?.error
+      });
+      
+      if (!s3Result || !s3Result.success) {
+        console.log('❌ S3 download failed:', s3Result?.error || 'Unknown error');
         return res.status(500).json({
           success: false,
-          message: 'Failed to download file from storage: ' + downloadResult.error
+          message: 'Failed to retrieve file from storage: ' + (s3Result?.error || 'Unknown error')
         });
       }
-      downloadBuffer = downloadResult.buffer;
+      
+      if (!s3Result.fileBuffer) {
+        console.log('❌ S3 returned success but no file buffer');
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to retrieve file from storage: Empty file buffer'
+        });
+      }
+      
+      console.log(`✅ File retrieved from S3 (${s3Result.fileBuffer.length} bytes)`);
     } catch (error) {
+      console.log('❌ S3 download error:', error.message);
+      console.error('Error stack:', error.stack);
       return res.status(500).json({
         success: false,
-        message: 'Failed to download file from storage: ' + error.message
+        message: 'Failed to retrieve file from storage: ' + error.message
       });
     }
 
-    // Decrypt file
-    const decryptionResult = decryptFile(downloadBuffer, password);
-    
-    if (!decryptionResult.success) {
+    // STEP 5: Verify password securely
+    console.log('🔐 STEP 5: Verifying password...');
+    const storedPassword = file.encryptionPassword;
+    if (!storedPassword) {
+      console.log('❌ No encryption password found for file');
+      return res.status(500).json({
+        success: false,
+        message: 'File encryption password not found. Please contact support.'
+      });
+    }
+
+    // Verify password matches
+    if (password !== storedPassword) {
+      console.log('❌ Password verification failed');
       return res.status(401).json({
         success: false,
-        message: 'Failed to decrypt file. Please check your password and try again.'
+        message: 'Invalid password. Please check your password and try again.'
       });
     }
+    console.log('✅ Password verified successfully');
 
-    // Update access statistics
-    if (file.updateLastAccessed) {
-      await file.updateLastAccessed();
-    }
-
-    // Set response headers
-    res.setHeader('Content-Type', file.fileType);
-    res.setHeader('Content-Length', decryptionResult.decryptedBuffer.length);
+    // STEP 6: Decrypt file temporarily in backend memory
+    console.log('🔓 STEP 6: Decrypting file in memory...');
+    const decryptResult = decryptFile(s3Result.fileBuffer, password);
     
-    if (!preview) {
-      res.setHeader('Content-Disposition', `attachment; filename="${file.originalName}"`);
-    } else {
-      res.setHeader('Content-Disposition', `inline; filename="${file.originalName}"`);
+    if (!decryptResult.success) {
+      console.log('❌ Decryption failed:', decryptResult.error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to decrypt file: ' + decryptResult.error
+      });
     }
+    
+    decryptedBuffer = decryptResult.decryptedBuffer;
+    console.log(`✅ File decrypted successfully (${decryptedBuffer.length} bytes)`);
+
+    // STEP 7: Stream decrypted file securely to browser
+    console.log('📤 STEP 7: Streaming file to browser...');
+    
+    // Set secure response headers
+    res.setHeader('Content-Type', file.fileType || 'application/octet-stream');
+    res.setHeader('Content-Length', decryptedBuffer.length);
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    
+    // STEP 8: Set correct filename and extension
+    const sanitizedFilename = file.originalName.replace(/"/g, '\\"');
+    if (!preview) {
+      res.setHeader('Content-Disposition', `attachment; filename="${sanitizedFilename}"`);
+    } else {
+      res.setHeader('Content-Disposition', `inline; filename="${sanitizedFilename}"`);
+    }
+
+    // Update access statistics (don't wait for this)
+    file.lastAccessed = new Date();
+    file.downloadCount = (file.downloadCount || 0) + 1;
+    file.save()
+      .catch(error => console.log('⚠️ Failed to update access statistics:', error.message));
 
     // Send decrypted file
-    res.send(decryptionResult.decryptedBuffer);
+    console.log('📤 Sending file to client...');
+    res.send(decryptedBuffer);
+    console.log('✅ File sent successfully');
 
   } catch (error) {
-    console.error('Download file error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error downloading file'
-    });
+    console.error('❌ Download file error:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    
+    // Ensure decrypted buffer is cleared from memory
+    decryptedBuffer = null;
+    
+    // Send error response
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: 'Server error downloading file: ' + error.message,
+        error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
+    }
+  } finally {
+    // Clear sensitive data from memory
+    decryptedBuffer = null;
+    console.log('📥 ===== DOWNLOAD FILE REQUEST END =====\n');
   }
 };
 

@@ -20,7 +20,8 @@ import {
   Download,
   Trash2,
   Settings,
-  HardDrive
+  HardDrive,
+  Share2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import EncryptionModal from './EncryptionModal';
@@ -30,6 +31,8 @@ import FilePreviewModal from './FilePreviewModal';
 import BucketConnectionModal from './BucketConnectionModal';
 import CreateBucketModal from './CreateBucketModal';
 import DeleteConfirmationModal from './DeleteConfirmationModal';
+import ShareFileModal from './ShareFileModal';
+import ShareManagementPage from './ShareManagementPage';
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
@@ -57,9 +60,12 @@ const Dashboard = () => {
   const [createFolderModalOpen, setCreateFolderModalOpen] = useState(false);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const [shareFileModalOpen, setShareFileModalOpen] = useState(false);
+  const [shareManagementOpen, setShareManagementOpen] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [selectedFileForDecryption, setSelectedFileForDecryption] = useState(null);
   const [selectedFileForPreview, setSelectedFileForPreview] = useState(null);
+  const [selectedFileForShare, setSelectedFileForShare] = useState(null);
   const [itemToDelete, setItemToDelete] = useState(null);
   const [decryptionAction, setDecryptionAction] = useState('download');
   const [uploadLoading, setUploadLoading] = useState(false);
@@ -313,15 +319,29 @@ const Dashboard = () => {
         preview: action === 'preview'
       });
       
-      // Create blob from response
-      const blob = new Blob([response.data]);
+      // Handle arraybuffer response
+      const arrayBuffer = response.data;
+      const blob = new Blob([arrayBuffer]);
       const url = window.URL.createObjectURL(blob);
+
+      // Get filename from response headers or use file name
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = file.originalName || file.fileName;
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
 
       // Download file
       const link = document.createElement('a');
       link.href = url;
-      link.download = file.originalName || file.fileName;
+      link.download = filename;
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
       
       toast.success('File decrypted and downloaded successfully', { id: 'decrypt' });
 
@@ -335,6 +355,10 @@ const Dashboard = () => {
       console.error('File action error:', error);
       if (error.response?.status === 401) {
         toast.error('Wrong password! Please check your password and try again.', { id: 'decrypt' });
+      } else if (error.response?.status === 404) {
+        toast.error('File not found.', { id: 'decrypt' });
+      } else if (error.code === 'ECONNABORTED') {
+        toast.error('Download timeout. Please try again.', { id: 'decrypt' });
       } else {
         toast.error('Failed to access file. Please try again.', { id: 'decrypt' });
       }
@@ -352,6 +376,12 @@ const Dashboard = () => {
       id: file.id
     });
     setDeleteConfirmationOpen(true);
+  };
+
+  // Handle file share
+  const handleShareFile = (file) => {
+    setSelectedFileForShare(file);
+    setShareFileModalOpen(true);
   };
 
   // Handle folder deletion
@@ -457,20 +487,6 @@ const Dashboard = () => {
               <Cloud className="text-blue-500 h-5 w-5 flex-shrink-0" />
               {!sidebarCollapsed && <span className="ml-3">My Files</span>}
             </button>
-            <button 
-              onClick={handleFileUpload}
-              className="text-gray-700 hover:bg-gray-50 hover:text-gray-900 group flex items-center w-full px-3 py-2 text-sm font-medium rounded-md transition-colors"
-            >
-              <Upload className="text-gray-400 group-hover:text-gray-500 h-5 w-5 flex-shrink-0" />
-              {!sidebarCollapsed && <span className="ml-3">Upload</span>}
-            </button>
-            <button 
-              onClick={handleCreateFolder}
-              className="text-gray-700 hover:bg-gray-50 hover:text-gray-900 group flex items-center w-full px-3 py-2 text-sm font-medium rounded-md transition-colors"
-            >
-              <Folder className="text-gray-400 group-hover:text-gray-500 h-5 w-5 flex-shrink-0" />
-              {!sidebarCollapsed && <span className="ml-3">New Folder</span>}
-            </button>
             
             {/* Divider */}
             <div className="my-2 border-t border-gray-200" />
@@ -556,6 +572,13 @@ const Dashboard = () => {
                   <FolderPlus className="w-4 h-4 mr-2" />
                   New Folder
                 </button>
+                <button
+                  onClick={() => setShareManagementOpen(true)}
+                  className="inline-flex items-center px-4 py-2.5 border-2 border-purple-300 text-sm leading-4 font-semibold rounded-lg text-purple-700 bg-purple-50 hover:bg-purple-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-all duration-200 shadow-md hover:shadow-lg"
+                >
+                  <Share2 className="w-4 h-4 mr-2" />
+                  My Shares
+                </button>
               </div>
             </div>
           </div>
@@ -631,23 +654,7 @@ const Dashboard = () => {
                   </div>
                 </div>
                 <h3 className="text-lg font-bold text-gray-900">Get Started</h3>
-                <p className="mt-2 text-sm text-gray-600 max-w-sm mx-auto">Upload your first file or create a folder to organize your storage.</p>
-                <div className="mt-6 flex justify-center space-x-4">
-                  <button
-                    onClick={handleFileUpload}
-                    className="inline-flex items-center px-6 py-3 border border-transparent shadow-md text-sm font-semibold rounded-lg text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 transition-all duration-200"
-                  >
-                    <UploadCloud className="w-5 h-5 mr-2" />
-                    Upload File
-                  </button>
-                  <button
-                    onClick={handleCreateFolder}
-                    className="inline-flex items-center px-6 py-3 border-2 border-gray-300 shadow-md text-sm font-semibold rounded-lg text-gray-700 bg-white hover:bg-gray-50 transition-all duration-200"
-                  >
-                    <FolderPlus className="w-5 h-5 mr-2" />
-                    New Folder
-                  </button>
-                </div>
+                <p className="mt-2 text-sm text-gray-600 max-w-sm mx-auto">Your storage is empty. Use the buttons above to upload files or create folders.</p>
               </div>
             </div>
           </div>
@@ -730,6 +737,13 @@ const Dashboard = () => {
                               title="Download"
                             >
                               <Download className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleShareFile(file)}
+                              className="p-2 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                              title="Share"
+                            >
+                              <Share2 className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleDeleteFile(file)}
@@ -815,6 +829,24 @@ const Dashboard = () => {
         onConfirm={handleConfirmDelete}
         item={itemToDelete}
         loading={deleteLoading}
+      />
+
+      <ShareFileModal
+        isOpen={shareFileModalOpen}
+        onClose={() => {
+          setShareFileModalOpen(false);
+          setSelectedFileForShare(null);
+        }}
+        file={selectedFileForShare}
+        onSuccess={() => {
+          setShareFileModalOpen(false);
+          setSelectedFileForShare(null);
+        }}
+      />
+
+      <ShareManagementPage
+        isOpen={shareManagementOpen}
+        onClose={() => setShareManagementOpen(false)}
       />
     </div>
   );

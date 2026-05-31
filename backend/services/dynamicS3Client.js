@@ -232,9 +232,21 @@ const uploadToUserS3 = async (userId, fileBuffer, s3Key, contentType = 'applicat
  */
 const downloadFromUserS3 = async (userId, s3Key) => {
   try {
+    console.log(`📥 downloadFromUserS3 called for user: ${userId}, key: ${s3Key}`);
+    
+    // Validate inputs
+    if (!userId || !s3Key) {
+      console.log(`❌ Invalid parameters: userId=${userId}, s3Key=${s3Key}`);
+      return {
+        success: false,
+        error: 'User ID and S3 key are required'
+      };
+    }
+    
     // Get S3 client for user
     const clientResult = await getS3ClientForUser(userId);
     if (!clientResult.success) {
+      console.log(`❌ Failed to get S3 client: ${clientResult.error}`);
       return {
         success: false,
         error: clientResult.error
@@ -242,6 +254,7 @@ const downloadFromUserS3 = async (userId, s3Key) => {
     }
 
     const { s3Client, bucketName } = clientResult;
+    console.log(`✅ S3 client ready for bucket: ${bucketName}`);
 
     // Download from S3
     const params = {
@@ -249,19 +262,114 @@ const downloadFromUserS3 = async (userId, s3Key) => {
       Key: s3Key
     };
 
+    console.log(`📥 Downloading from S3:`, {
+      Bucket: params.Bucket,
+      Key: params.Key
+    });
+
     const result = await s3Client.getObject(params).promise();
+
+    // Validate result
+    if (!result) {
+      console.log(`❌ S3 getObject returned empty result`);
+      return {
+        success: false,
+        error: 'S3 returned empty result'
+      };
+    }
+
+    console.log(`✅ S3 response received:`, {
+      ContentType: result.ContentType,
+      ContentLength: result.ContentLength,
+      BodyType: typeof result.Body,
+      BodyIsBuffer: Buffer.isBuffer(result.Body),
+      BodyExists: !!result.Body
+    });
+
+    // Convert Body to Buffer - handle all possible types
+    let fileBuffer;
+    
+    if (!result.Body) {
+      console.log(`❌ S3 Body is undefined or null`);
+      return {
+        success: false,
+        error: 'S3 returned empty file body'
+      };
+    }
+
+    if (Buffer.isBuffer(result.Body)) {
+      fileBuffer = result.Body;
+      console.log(`✅ Body is already a Buffer (${fileBuffer.length} bytes)`);
+    } else if (result.Body instanceof Uint8Array) {
+      fileBuffer = Buffer.from(result.Body);
+      console.log(`✅ Converted Uint8Array to Buffer (${fileBuffer.length} bytes)`);
+    } else if (typeof result.Body === 'string') {
+      fileBuffer = Buffer.from(result.Body, 'utf8');
+      console.log(`✅ Converted string to Buffer (${fileBuffer.length} bytes)`);
+    } else if (result.Body && typeof result.Body.read === 'function') {
+      // It's a stream - read all data
+      console.log(`📖 Body is a stream, reading data...`);
+      
+      // Use a proper stream-to-buffer conversion with error handling
+      const chunks = [];
+      
+      try {
+        for await (const chunk of result.Body) {
+          if (chunk) {
+            console.log(`📖 Received chunk: ${chunk.length} bytes`);
+            chunks.push(chunk);
+          }
+        }
+        
+        fileBuffer = Buffer.concat(chunks);
+        console.log(`✅ Stream read complete (${fileBuffer.length} bytes)`);
+      } catch (streamError) {
+        console.error(`❌ Stream reading error:`, streamError.message);
+        return {
+          success: false,
+          error: 'Failed to read file stream: ' + streamError.message
+        };
+      }
+    } else {
+      // Try to convert whatever it is to a buffer
+      console.log(`⚠️ Unknown Body type: ${typeof result.Body}, attempting conversion...`);
+      try {
+        fileBuffer = Buffer.from(result.Body);
+        console.log(`✅ Converted unknown type to Buffer (${fileBuffer.length} bytes)`);
+      } catch (conversionError) {
+        console.error(`❌ Failed to convert Body to Buffer:`, conversionError);
+        return {
+          success: false,
+          error: 'Failed to convert S3 response to buffer'
+        };
+      }
+    }
+
+    // Validate buffer
+    if (!fileBuffer || fileBuffer.length === 0) {
+      console.log(`❌ File buffer is empty`);
+      return {
+        success: false,
+        error: 'Downloaded file is empty'
+      };
+    }
+
+    console.log(`✅ S3 download successful (${fileBuffer.length} bytes)`);
 
     return {
       success: true,
-      buffer: result.Body,
+      fileBuffer: fileBuffer,
       contentType: result.ContentType,
       size: result.ContentLength
     };
   } catch (error) {
-    console.error('Download from user S3 error:', error);
+    console.error('❌ Download from user S3 error:', error);
+    console.error('Error code:', error.code);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
     return {
       success: false,
-      error: error.message
+      error: error.message || 'Unknown S3 download error'
     };
   }
 };

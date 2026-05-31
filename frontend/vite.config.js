@@ -9,3 +9,4 @@ export default defineConfig({
     strictPort: false, // Allow fallback to next available port if 5173 is in use
   }
 })
+

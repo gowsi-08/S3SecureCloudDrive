@@ -7,6 +7,7 @@ import Login from './components/auth/Login';
 import Register from './components/auth/Register';
 import Dashboard from './components/Dashboard';
 import DiagnosticPage from './components/DiagnosticPage';
+import ShareAccessPage from './components/ShareAccessPage';
 import './App.css';
 
 // Error Boundary Component
@@ -65,6 +66,7 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/diagnostics" element={<DiagnosticPage />} />
+              <Route path="/share/:shareToken" element={<ShareAccessPage />} />
               
               {/* Protected Routes */}
               <Route 

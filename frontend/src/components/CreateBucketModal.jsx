@@ -219,7 +219,7 @@ const CreateBucketModal = ({ isOpen, onClose, onSuccess }) => {
                   value={formData.bucketName}
                   onChange={handleChange}
                   placeholder="my-secure-storage"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900 placeholder-gray-400"
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 placeholder-gray-500 font-medium"
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   📝 Exact name of your S3 bucket (3-63 characters, lowercase)
@@ -235,7 +235,7 @@ const CreateBucketModal = ({ isOpen, onClose, onSuccess }) => {
                   name="region"
                   value={formData.region}
                   onChange={handleChange}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 font-medium"
                 >
                   <option value="us-east-1">US East (N. Virginia) - us-east-1</option>
                   <option value="us-west-1">US West (N. California) - us-west-1</option>
@@ -262,7 +262,7 @@ const CreateBucketModal = ({ isOpen, onClose, onSuccess }) => {
                   value={formData.accessKeyId}
                   onChange={handleChange}
                   placeholder="AKIA..."
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono bg-white text-gray-900 placeholder-gray-400"
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono bg-white text-gray-900 placeholder-gray-500 font-medium"
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   🔑 From IAM user → Security credentials → Access keys
@@ -281,7 +281,7 @@ const CreateBucketModal = ({ isOpen, onClose, onSuccess }) => {
                     value={formData.secretAccessKey}
                     onChange={handleChange}
                     placeholder="••••••••••••••••••••••••••••••••"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono bg-white text-gray-900 placeholder-gray-400"
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono bg-white text-gray-900 placeholder-gray-500 font-medium"
                   />
                   <button
                     type="button"

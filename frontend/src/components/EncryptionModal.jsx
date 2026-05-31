@@ -289,7 +289,7 @@ const EncryptionModal = ({
                 </label>
                 <div className="relative">
                   <input
-                    type={showAccountPassword ? 'text' : 'password'}
+                    type={showAccountPassword ? 'password' : 'text'}
                     value={accountPassword}
                     onChange={(e) => {
                       setAccountPassword(e.target.value);
@@ -297,7 +297,7 @@ const EncryptionModal = ({
                         setErrors(prev => ({ ...prev, accountPassword: '' }));
                       }
                     }}
-                    className={`w-full px-3 py-2 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    className={`w-full px-4 py-3 pr-12 border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 placeholder-gray-500 font-medium ${
                       errors.accountPassword ? 'border-red-500' : 'border-gray-300'
                     }`}
                     placeholder="Enter your account password"
@@ -307,10 +307,10 @@ const EncryptionModal = ({
                   <button
                     type="button"
                     onClick={() => setShowAccountPassword(!showAccountPassword)}
-                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                    className="absolute inset-y-0 right-0 flex items-center pr-4 text-gray-500 hover:text-gray-700 transition"
                     disabled={loading}
                   >
-                    {showAccountPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showAccountPassword ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
                   </button>
                 </div>
                 {errors.accountPassword && (
@@ -361,10 +361,10 @@ const EncryptionModal = ({
                 </label>
                 <div className="relative">
                   <input
-                    type={showCustomPassword ? 'text' : 'password'}
+                    type={showCustomPassword ? 'password' : 'text'}
                     value={customPassword}
                     onChange={(e) => handleCustomPasswordChange(e.target.value)}
-                    className={`w-full px-3 py-2 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                    className={`w-full px-4 py-3 pr-12 border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white text-gray-900 placeholder-gray-500 font-medium ${
                       errors.customPassword ? 'border-red-500' : 'border-gray-300'
                     }`}
                     placeholder="Enter a strong password"
@@ -374,10 +374,10 @@ const EncryptionModal = ({
                   <button
                     type="button"
                     onClick={() => setShowCustomPassword(!showCustomPassword)}
-                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                    className="absolute inset-y-0 right-0 flex items-center pr-4 text-gray-500 hover:text-gray-700 transition"
                     disabled={loading}
                   >
-                    {showCustomPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showCustomPassword ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
                   </button>
                 </div>
                 
@@ -413,7 +413,7 @@ const EncryptionModal = ({
                 </label>
                 <div className="relative">
                   <input
-                    type={showConfirmPassword ? 'text' : 'password'}
+                    type={showConfirmPassword ? 'password' : 'text'}
                     value={confirmCustomPassword}
                     onChange={(e) => {
                       setConfirmCustomPassword(e.target.value);
@@ -421,7 +421,7 @@ const EncryptionModal = ({
                         setErrors(prev => ({ ...prev, confirmCustomPassword: '' }));
                       }
                     }}
-                    className={`w-full px-3 py-2 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                    className={`w-full px-4 py-3 pr-12 border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white text-gray-900 placeholder-gray-500 font-medium ${
                       errors.confirmCustomPassword ? 'border-red-500' : 'border-gray-300'
                     }`}
                     placeholder="Confirm your password"
@@ -431,10 +431,10 @@ const EncryptionModal = ({
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                    className="absolute inset-y-0 right-0 flex items-center pr-4 text-gray-500 hover:text-gray-700 transition"
                     disabled={loading}
                   >
-                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showConfirmPassword ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
                   </button>
                 </div>
                 {errors.confirmCustomPassword && (

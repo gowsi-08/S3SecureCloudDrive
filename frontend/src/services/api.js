@@ -62,13 +62,42 @@ export const fileAPI = {
   getFiles: (folderId = null) => api.get('/files', { params: { folderId } }),
   downloadFile: (fileId, data) => 
     api.post(`/files/${fileId}/download`, data, {
-      responseType: 'blob'
+      responseType: 'arraybuffer',
+      timeout: 300000 // 5 minute timeout for large files
     }),
   deleteFile: (fileId) => api.delete(`/files/${fileId}`),
   renameFile: (fileId, newName) => api.put(`/files/${fileId}/rename`, { newName }),
   getFileDetails: (fileId) => api.get(`/files/${fileId}`),
   searchFiles: (query, fileType = null, folderId = null) => 
-    api.get('/files/search', { params: { query, fileType, folderId } })
+    api.get('/files/search', { params: { query, fileType, folderId } }),
+  
+  // Share file functions
+  createShareLink: (shareData) =>
+    api.post('/shared-files/create', shareData),
+  
+  getShareDetails: (shareToken) =>
+    api.get(`/shared-files/${shareToken}/details`),
+  
+  verifySharePassword: (shareToken, data) =>
+    api.post(`/shared-files/${shareToken}/verify-password`, data),
+  
+  downloadSharedFile: (shareToken, data) =>
+    api.post(`/shared-files/${shareToken}/download`, data, {
+      responseType: 'blob',
+      timeout: 300000 // 5 minute timeout for large files
+    }),
+  
+  previewSharedFile: (shareToken, data) =>
+    api.post(`/shared-files/${shareToken}/preview`, data, {
+      responseType: 'arraybuffer',
+      timeout: 300000 // 5 minute timeout for large files
+    }),
+  
+  getMyShares: () =>
+    api.get('/shared-files/my-shares'),
+  
+  deactivateShare: (shareId) =>
+    api.delete(`/shared-files/${shareId}`)
 };
 
 // Secure File API functions (new secure encryption system)
@@ -147,6 +176,39 @@ export const cloudConfigAPI = {
   // Update bucket configuration
   updateBucketConfig: (updateData) => 
     api.put('/cloud-config/update', updateData)
+};
+
+// Shared Files API functions (Secure file sharing system)
+export const sharedFilesAPI = {
+  // Generate share link
+  generateShareLink: (shareData) =>
+    api.post('/shared-files/generate', shareData),
+
+  // Get share details (public - no auth required)
+  getShareDetails: (shareToken) =>
+    api.get(`/shared-files/${shareToken}/details`),
+
+  // Verify share password (public - no auth required)
+  verifySharePassword: (shareToken, password) =>
+    api.post(`/shared-files/${shareToken}/verify-password`, { password }),
+
+  // Download shared file (public - no auth required)
+  downloadSharedFile: (shareToken, password, preview = false) =>
+    api.post(`/shared-files/${shareToken}/download`, { password, preview }, {
+      responseType: 'blob'
+    }),
+
+  // Get user's shares (protected)
+  getMyShares: (page = 1, limit = 10) =>
+    api.get('/shared-files/my-shares', { params: { page, limit } }),
+
+  // Deactivate share (protected)
+  deactivateShare: (shareId) =>
+    api.put(`/shared-files/${shareId}/deactivate`),
+
+  // Delete share (protected)
+  deleteShare: (shareId) =>
+    api.delete(`/shared-files/${shareId}`)
 };
 
 export default api;

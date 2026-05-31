@@ -15,6 +15,7 @@
     "framer-motion": "^12.38.0",
     "js-cookie": "^3.0.5",
     "lucide-react": "^0.294.0",
+    "pdfjs-dist": "^5.7.284",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hot-toast": "^2.6.0",

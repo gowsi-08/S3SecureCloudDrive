@@ -63,6 +63,11 @@ const fileSchema = new mongoose.Schema({
     type: String,
     default: 'aes-256-gcm'
   },
+  encryptionPassword: {
+    type: String,
+    default: null,
+    select: false // Don't select by default for security
+  },
   customPasswordHash: {
     type: String,
     default: null // Only set if custom password is used and user opts to store hash

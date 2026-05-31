@@ -17,6 +17,7 @@ const folderRoutes = require('./routes/folders');
 const secureFileRoutes = require('./routes/secureFiles');
 const secureDeleteRoutes = require('./routes/secureDelete');
 const cloudConfigRoutes = require('./routes/cloudConfig');
+const sharedFilesRoutes = require('./routes/sharedFiles');
 
 // Security middleware
 app.use(helmet({
@@ -60,6 +61,7 @@ app.use('/api/folders', folderRoutes);
 app.use('/api/secure-files', secureFileRoutes);
 app.use('/api/secure-delete', secureDeleteRoutes);
 app.use('/api/cloud-config', cloudConfigRoutes);
+app.use('/api/shared-files', sharedFilesRoutes);
 
 // 404 handler
 app.use((req, res) => {
