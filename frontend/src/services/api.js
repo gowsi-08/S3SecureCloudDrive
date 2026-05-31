@@ -35,11 +35,25 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Only logout on actual token expiration/invalid token errors
+    // Don't logout on password validation errors (401 from file operations)
     if (error.response?.status === 401) {
-      // Token expired or invalid
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      const errorMessage = error.response?.data?.message || '';
+      const endpoint = error.config?.url || '';
+      
+      // Check if this is a token/auth error vs password validation error
+      const isAuthError = 
+        errorMessage.includes('token') || 
+        errorMessage.includes('unauthorized') ||
+        errorMessage.includes('not authenticated') ||
+        endpoint.includes('/auth/');
+      
+      // Only logout if it's an actual auth/token error
+      if (isAuthError) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }
@@ -62,7 +76,7 @@ export const fileAPI = {
   getFiles: (folderId = null) => api.get('/files', { params: { folderId } }),
   downloadFile: (fileId, data) => 
     api.post(`/files/${fileId}/download`, data, {
-      responseType: 'arraybuffer',
+      responseType: 'blob',
       timeout: 300000 // 5 minute timeout for large files
     }),
   deleteFile: (fileId) => api.delete(`/files/${fileId}`),

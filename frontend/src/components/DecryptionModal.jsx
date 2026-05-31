@@ -87,6 +87,19 @@ const DecryptionModal = ({
       
     } catch (error) {
       console.error('Decryption error:', error);
+      
+      // Show error on the same page instead of throwing
+      if (step === 'account-password') {
+        setErrors({
+          accountPassword: error.message || 'Wrong password. Please check your password and try again.'
+        });
+      } else if (step === 'custom-password') {
+        setErrors({
+          customPassword: error.message || 'Wrong password. Please check your password and try again.'
+        });
+      }
+      
+      // Don't close the modal, let user fix the error
       toast.error(error.message || 'Decryption failed. Please check your password.');
     }
   };
@@ -283,7 +296,9 @@ const DecryptionModal = ({
                   </button>
                 </div>
                 {errors.accountPassword && (
-                  <p className="mt-1 text-sm text-red-600">{errors.accountPassword}</p>
+                  <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm text-red-700">{errors.accountPassword}</p>
+                  </div>
                 )}
               </div>
 
@@ -356,7 +371,9 @@ const DecryptionModal = ({
                   </button>
                 </div>
                 {errors.customPassword && (
-                  <p className="mt-1 text-sm text-red-600">{errors.customPassword}</p>
+                  <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm text-red-700">{errors.customPassword}</p>
+                  </div>
                 )}
               </div>
 

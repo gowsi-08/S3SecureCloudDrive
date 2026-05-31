@@ -74,11 +74,6 @@ const validatePassword = (password, isCustomPassword = false) => {
     result.errors.push(`Password must be at least ${PASSWORD_MIN_LENGTH} characters long`);
   }
 
-  // Additional strength checks only for custom passwords
-  if (isCustomPassword && password.length < 12) {
-    result.errors.push('For better security, use at least 12 characters');
-  }
-
   result.isValid = result.errors.length === 0;
   return result;
 };

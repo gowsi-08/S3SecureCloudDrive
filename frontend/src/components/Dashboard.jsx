@@ -28,6 +28,7 @@ import EncryptionModal from './EncryptionModal';
 import DecryptionModal from './DecryptionModal';
 import CreateFolderModal from './CreateFolderModal';
 import FilePreviewModal from './FilePreviewModal';
+import FilePreviewViewer from './FilePreviewViewer';
 import BucketConnectionModal from './BucketConnectionModal';
 import CreateBucketModal from './CreateBucketModal';
 import DeleteConfirmationModal from './DeleteConfirmationModal';
@@ -59,6 +60,7 @@ const Dashboard = () => {
   const [decryptionModalOpen, setDecryptionModalOpen] = useState(false);
   const [createFolderModalOpen, setCreateFolderModalOpen] = useState(false);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewViewerOpen, setPreviewViewerOpen] = useState(false);
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [shareFileModalOpen, setShareFileModalOpen] = useState(false);
   const [shareManagementOpen, setShareManagementOpen] = useState(false);
@@ -66,6 +68,8 @@ const Dashboard = () => {
   const [selectedFileForDecryption, setSelectedFileForDecryption] = useState(null);
   const [selectedFileForPreview, setSelectedFileForPreview] = useState(null);
   const [selectedFileForShare, setSelectedFileForShare] = useState(null);
+  const [previewData, setPreviewData] = useState(null);
+  const [previewType, setPreviewType] = useState(null);
   const [itemToDelete, setItemToDelete] = useState(null);
   const [decryptionAction, setDecryptionAction] = useState('download');
   const [uploadLoading, setUploadLoading] = useState(false);
@@ -271,36 +275,24 @@ const Dashboard = () => {
         preview: true
       });
       
-      // Create blob from response
-      const blob = new Blob([response.data], { type: file.fileType });
-      const url = window.URL.createObjectURL(blob);
-
-      // Handle different file types
-      if (file.category === 'image') {
-        const newWindow = window.open();
-        newWindow.document.write(`
-          <html>
-            <head><title>${file.fileName}</title></head>
-            <body style="margin:0; display:flex; justify-content:center; align-items:center; min-height:100vh; background:#f3f4f6;">
-              <img src="${url}" style="max-width:100%; max-height:100vh; object-fit:contain;" alt="${file.fileName}">
-            </body>
-          </html>
-        `);
-      } else if (file.category === 'pdf') {
-        window.open(url, '_blank');
+      // response.data is already a blob
+      const blob = response.data;
+      
+      // For text files, read the blob as text
+      if (file.fileType && file.fileType.startsWith('text/')) {
+        const text = await blob.text();
+        setPreviewData(text);
       } else {
-        // For other files, download them
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = file.originalName || file.fileName;
-        link.click();
+        // For other file types, create a blob URL
+        const url = URL.createObjectURL(blob);
+        setPreviewData(url);
       }
       
-      toast.success('File decrypted and previewed successfully');
+      setPreviewType(file.fileType);
+      setPreviewViewerOpen(true);
+      setPreviewModalOpen(false);
+      toast.success('File preview loaded');
       
-      // Clean up
-      setTimeout(() => window.URL.revokeObjectURL(url), 1000);
-
     } catch (error) {
       console.error('Preview error:', error);
       throw error; // Re-throw to be handled by the modal
@@ -319,9 +311,8 @@ const Dashboard = () => {
         preview: action === 'preview'
       });
       
-      // Handle arraybuffer response
-      const arrayBuffer = response.data;
-      const blob = new Blob([arrayBuffer]);
+      // response.data is already a blob
+      const blob = response.data;
       const url = window.URL.createObjectURL(blob);
 
       // Get filename from response headers or use file name
@@ -669,38 +660,88 @@ const Dashboard = () => {
           ) : (
             <>
               {(folders.length > 0 || files.length > 0) && (
-                <div className="bg-white shadow rounded-lg">
-                  <div className="px-4 py-5 sm:p-6">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                <div className="bg-white shadow-lg rounded-xl overflow-hidden">
+                  {/* Table Header */}
+                  <div className="hidden md:grid md:grid-cols-12 gap-4 px-6 py-4 bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 font-semibold text-sm text-gray-700">
+                    <div className="md:col-span-5">Name</div>
+                    <div className="md:col-span-2">Type</div>
+                    <div className="md:col-span-2">Size</div>
+                    <div className="md:col-span-3">Actions</div>
+                  </div>
+
+                  {/* Items List */}
+                  <div className="divide-y divide-gray-200">
                     {/* Folders */}
                     {folders.map((folder) => (
                       <div
                         key={folder.id}
-                        className="group relative bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-200 rounded-xl p-4 hover:shadow-lg hover:border-blue-400 transition-all duration-200 cursor-pointer"
-                        onClick={() => navigateToFolder(folder)}
+                        className="group hover:bg-blue-50 transition-colors duration-150"
                       >
-                        <div className="flex items-center space-x-3 mb-3">
-                          <div className="p-2 bg-blue-500 rounded-lg">
-                            <Folder className="h-6 w-6 text-white" />
+                        {/* Desktop View */}
+                        <div className="hidden md:grid md:grid-cols-12 gap-4 px-6 py-4 items-center">
+                          <div 
+                            className="md:col-span-5 flex items-center space-x-3 cursor-pointer"
+                            onClick={() => navigateToFolder(folder)}
+                          >
+                            <div className="p-2 bg-blue-100 rounded-lg">
+                              <Folder className="h-5 w-5 text-blue-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate hover:text-blue-600 transition-colors">
+                                {folder.name}
+                              </p>
+                            </div>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-gray-900 truncate">{folder.name}</p>
-                            <p className="text-xs text-gray-600">Folder</p>
+                          <div className="md:col-span-2">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              Folder
+                            </span>
+                          </div>
+                          <div className="md:col-span-2 text-sm text-gray-600">-</div>
+                          <div className="md:col-span-3 flex items-center justify-end space-x-2">
+                            <button
+                              onClick={() => navigateToFolder(folder)}
+                              className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                              title="Open folder"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteFolder(folder)}
+                              className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                              title="Delete folder"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
                         </div>
-                        
-                        {/* Folder actions */}
-                        <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteFolder(folder);
-                            }}
-                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Delete folder"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+
+                        {/* Mobile View */}
+                        <div className="md:hidden px-4 py-4 space-y-3">
+                          <div className="flex items-center space-x-3">
+                            <div className="p-2 bg-blue-100 rounded-lg">
+                              <Folder className="h-5 w-5 text-blue-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate">{folder.name}</p>
+                              <p className="text-xs text-gray-500">Folder</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-end space-x-2">
+                            <button
+                              onClick={() => navigateToFolder(folder)}
+                              className="flex-1 inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                            >
+                              <ChevronRight className="w-4 h-4 mr-1" />
+                              Open
+                            </button>
+                            <button
+                              onClick={() => handleDeleteFolder(folder)}
+                              className="inline-flex items-center px-3 py-2 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -709,54 +750,100 @@ const Dashboard = () => {
                     {files.map((file) => (
                       <div
                         key={file.id}
-                        className="group relative bg-gradient-to-br from-gray-50 to-gray-100 border-2 border-gray-200 rounded-xl p-4 hover:shadow-lg hover:border-gray-400 transition-all duration-200"
+                        className="group hover:bg-gray-50 transition-colors duration-150"
                       >
-                        <div className="flex items-center space-x-3 mb-3">
-                          <div className="p-2 bg-gray-400 rounded-lg">
-                            <File className="h-6 w-6 text-white" />
+                        {/* Desktop View */}
+                        <div className="hidden md:grid md:grid-cols-12 gap-4 px-6 py-4 items-center">
+                          <div className="md:col-span-5 flex items-center space-x-3">
+                            <div className="p-2 bg-gray-100 rounded-lg">
+                              <File className="h-5 w-5 text-gray-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate">{file.fileName}</p>
+                            </div>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-gray-900 truncate">{file.fileName}</p>
-                            <p className="text-xs text-gray-600">{file.fileSize}</p>
+                          <div className="md:col-span-2">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                              {file.fileType?.split('/')[1]?.toUpperCase() || 'File'}
+                            </span>
                           </div>
-                        </div>
-                        
-                        {/* File actions */}
-                        <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <div className="flex space-x-1 bg-white rounded-lg shadow-md p-1">
+                          <div className="md:col-span-2 text-sm text-gray-600">{file.fileSize}</div>
+                          <div className="md:col-span-3 flex items-center justify-end space-x-2">
                             <button
                               onClick={() => handleFileAction(file, 'preview')}
-                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                              className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
                               title="Preview"
                             >
                               <Eye className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleFileAction(file, 'download')}
-                              className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                              className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-green-600 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
                               title="Download"
                             >
                               <Download className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleShareFile(file)}
-                              className="p-2 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                              className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
                               title="Share"
                             >
                               <Share2 className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleDeleteFile(file)}
-                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                              className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
                               title="Delete"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </div>
+
+                        {/* Mobile View */}
+                        <div className="md:hidden px-4 py-4 space-y-3">
+                          <div className="flex items-center space-x-3">
+                            <div className="p-2 bg-gray-100 rounded-lg">
+                              <File className="h-5 w-5 text-gray-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate">{file.fileName}</p>
+                              <p className="text-xs text-gray-500">{file.fileSize}</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => handleFileAction(file, 'preview')}
+                              className="inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                            >
+                              <Eye className="w-4 h-4 mr-1" />
+                              Preview
+                            </button>
+                            <button
+                              onClick={() => handleFileAction(file, 'download')}
+                              className="inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-green-600 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
+                            >
+                              <Download className="w-4 h-4 mr-1" />
+                              Download
+                            </button>
+                            <button
+                              onClick={() => handleShareFile(file)}
+                              className="inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
+                            >
+                              <Share2 className="w-4 h-4 mr-1" />
+                              Share
+                            </button>
+                            <button
+                              onClick={() => handleDeleteFile(file)}
+                              className="inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4 mr-1" />
+                              Delete
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     ))}
-                    </div>
                   </div>
                 </div>
               )}
@@ -847,6 +934,18 @@ const Dashboard = () => {
       <ShareManagementPage
         isOpen={shareManagementOpen}
         onClose={() => setShareManagementOpen(false)}
+      />
+
+      <FilePreviewViewer
+        isOpen={previewViewerOpen}
+        onClose={() => {
+          setPreviewViewerOpen(false);
+          setPreviewData(null);
+          setPreviewType(null);
+        }}
+        fileData={previewData}
+        fileName={selectedFileForPreview?.fileName}
+        fileType={previewType}
       />
     </div>
   );
