@@ -72,18 +72,35 @@ export const authAPI = {
 
 // File API functions
 export const fileAPI = {
-  uploadFiles: (formData) => api.post('/files/upload', formData),
-  getFiles: (folderId = null) => api.get('/files', { params: { folderId } }),
+  uploadFiles: (formData, bucketId = null) => {
+    const url = bucketId 
+      ? `/files/upload?bucketId=${bucketId}`
+      : '/files/upload';
+    return api.post(url, formData);
+  },
+  getFiles: (folderId = null, bucketId = null) => {
+    const params = { folderId };
+    if (bucketId) params.bucketId = bucketId;
+    return api.get('/files', { params });
+  },
   downloadFile: (fileId, data) => 
     api.post(`/files/${fileId}/download`, data, {
       responseType: 'blob',
       timeout: 300000 // 5 minute timeout for large files
     }),
-  deleteFile: (fileId) => api.delete(`/files/${fileId}`),
+  deleteFile: (fileId, bucketId = null) => {
+    const url = bucketId 
+      ? `/files/${fileId}?bucketId=${bucketId}`
+      : `/files/${fileId}`;
+    return api.delete(url);
+  },
   renameFile: (fileId, newName) => api.put(`/files/${fileId}/rename`, { newName }),
   getFileDetails: (fileId) => api.get(`/files/${fileId}`),
-  searchFiles: (query, fileType = null, folderId = null) => 
-    api.get('/files/search', { params: { query, fileType, folderId } }),
+  searchFiles: (query, fileType = null, folderId = null, bucketId = null) => {
+    const params = { query, fileType, folderId };
+    if (bucketId) params.bucketId = bucketId;
+    return api.get('/files/search', { params });
+  },
   
   // Share file functions
   createShareLink: (shareData) =>
@@ -152,14 +169,29 @@ export const secureDeleteAPI = {
 
 // Folder API functions
 export const folderAPI = {
-  createFolder: (folderName, parentFolderId = null) => 
-    api.post('/folders', { folderName, parentFolderId }),
-  getFolderContents: (folderId = 'root') => api.get(`/folders/${folderId}/contents`),
+  createFolder: (folderName, parentFolderId = null, bucketId = null) => {
+    const url = bucketId 
+      ? `/folders?bucketId=${bucketId}`
+      : '/folders';
+    return api.post(url, { folderName, parentFolderId });
+  },
+  getFolderContents: (folderId = 'root', bucketId = null) => {
+    const url = bucketId 
+      ? `/folders/${folderId}/contents?bucketId=${bucketId}`
+      : `/folders/${folderId}/contents`;
+    return api.get(url);
+  },
   getFolderHierarchy: (folderId) => api.get(`/folders/${folderId}/hierarchy`),
   renameFolder: (folderId, newName) => api.put(`/folders/${folderId}/rename`, { newName }),
   deleteFolder: (folderId) => api.delete(`/folders/${folderId}`),
-  getStorageStats: () => api.get('/folders/stats')
+  getStorageStats: (bucketId = null) => {
+    const url = bucketId 
+      ? `/folders/stats?bucketId=${bucketId}`
+      : '/folders/stats';
+    return api.get(url);
+  }
 };
+
 
 // Cloud Configuration API functions (BYOS - Bring Your Own Storage)
 export const cloudConfigAPI = {
@@ -167,13 +199,13 @@ export const cloudConfigAPI = {
   connectBucket: (bucketData) => 
     api.post('/cloud-config/connect', bucketData),
 
-  // Get connection status
+  // Get connection status - returns all connected buckets
   getConnectionStatus: () => 
     api.get('/cloud-config/status'),
 
-  // Disconnect bucket
-  disconnectBucket: () => 
-    api.post('/cloud-config/disconnect'),
+  // Disconnect a specific bucket
+  disconnectBucket: (bucketId) => 
+    api.post(`/cloud-config/disconnect/${bucketId}`),
 
   // Test connection
   testConnection: () => 
@@ -184,12 +216,20 @@ export const cloudConfigAPI = {
     api.get(`/cloud-config/iam-policy?bucketName=${bucketName}`),
 
   // Get bucket statistics
-  getBucketStats: () => 
-    api.get('/cloud-config/stats'),
+  getBucketStats: (bucketId = null) => {
+    const url = bucketId 
+      ? `/cloud-config/stats?bucketId=${bucketId}`
+      : '/cloud-config/stats';
+    return api.get(url);
+  },
 
   // Update bucket configuration
   updateBucketConfig: (updateData) => 
-    api.put('/cloud-config/update', updateData)
+    api.put('/cloud-config/update', updateData),
+
+  // Fix credential decryption issue
+  fixCredentials: (credentials) =>
+    api.post('/cloud-config/fix-credentials', credentials)
 };
 
 // Shared Files API functions (Secure file sharing system)

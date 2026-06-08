@@ -277,37 +277,56 @@ const getShareDetails = async (req, res) => {
     
     // Find shared file
     const sharedFile = await SharedFile.findOne({ shareToken })
-      .populate('fileId', 'fileName fileSize fileType originalName')
+      .populate('fileId', 'fileName fileSize fileType originalName isDeleted')
       .populate('ownerUserId', 'name email');
     
+    // If share doesn't exist, it was either never created or has been permanently deleted
     if (!sharedFile) {
+      console.log('❌ Share not found - either never existed or has been permanently deleted');
       return res.status(404).json({
         success: false,
-        message: 'Share link not found'
+        message: 'This shared file is no longer available',
+        code: 'SHARE_DELETED'
+      });
+    }
+    
+    // Check if file has been deleted (file reference should be null after hard delete)
+    if (!sharedFile.fileId || sharedFile.fileId.isDeleted) {
+      console.log('⚠️ Share references a deleted file');
+      return res.status(410).json({
+        success: false,
+        message: 'This file has been deleted by the owner',
+        code: 'FILE_DELETED'
       });
     }
     
     // Check if share is active
     if (!sharedFile.isActive) {
+      console.log('⚠️ Share is inactive');
       return res.status(403).json({
         success: false,
-        message: 'This share link is no longer active'
+        message: 'This share link is no longer active',
+        code: 'SHARE_INACTIVE'
       });
     }
     
     // Check if share is expired
     if (sharedFile.isExpired) {
+      console.log('⚠️ Share is expired');
       return res.status(410).json({
         success: false,
-        message: 'This share link has expired'
+        message: 'This share link has expired',
+        code: 'SHARE_EXPIRED'
       });
     }
     
     // Check if download limit reached
     if (sharedFile.downloadLimitReached) {
+      console.log('⚠️ Download limit reached');
       return res.status(410).json({
         success: false,
-        message: 'Download limit has been reached for this share'
+        message: 'Download limit has been reached for this share',
+        code: 'DOWNLOAD_LIMIT_REACHED'
       });
     }
     
@@ -475,7 +494,8 @@ const downloadSharedFile = async (req, res) => {
     if (!shareToken || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Share token and password are required'
+        message: 'Share token and password are required',
+        code: 'MISSING_CREDENTIALS'
       });
     }
     console.log('✅ Share token and password provided');
@@ -486,15 +506,16 @@ const downloadSharedFile = async (req, res) => {
       .select('+hashedSharePassword +fileEncryptionPassword')
       .populate({
         path: 'fileId',
-        select: 's3Key fileType originalName +encryptionPassword'
+        select: 's3Key fileType originalName +encryptionPassword isDeleted bucketId'
       })
       .populate('ownerUserId', '_id');
     
     if (!sharedFile) {
-      console.log('❌ Share link not found');
+      console.log('❌ Share link not found - permanently deleted or never existed');
       return res.status(404).json({
         success: false,
-        message: 'Share link not found'
+        message: 'This file has been deleted by the owner',
+        code: 'SHARE_DELETED'
       });
     }
     console.log('✅ Share token verified');
@@ -505,7 +526,8 @@ const downloadSharedFile = async (req, res) => {
       console.log('❌ Share link is no longer active');
       return res.status(403).json({
         success: false,
-        message: 'This share link is no longer active'
+        message: 'This share link is no longer active',
+        code: 'SHARE_INACTIVE'
       });
     }
     console.log('✅ Share is active');
@@ -516,7 +538,8 @@ const downloadSharedFile = async (req, res) => {
       console.log('❌ Share link has expired');
       return res.status(410).json({
         success: false,
-        message: 'This share link has expired'
+        message: 'This share link has expired',
+        code: 'SHARE_EXPIRED'
       });
     }
     console.log('✅ Share is not expired');
@@ -527,7 +550,8 @@ const downloadSharedFile = async (req, res) => {
       console.log('❌ Download limit reached');
       return res.status(410).json({
         success: false,
-        message: 'Download limit has been reached for this share'
+        message: 'Download limit has been reached for this share',
+        code: 'DOWNLOAD_LIMIT_REACHED'
       });
     }
     console.log('✅ Download limit not reached');
@@ -538,7 +562,8 @@ const downloadSharedFile = async (req, res) => {
       console.log('❌ Preview not allowed');
       return res.status(403).json({
         success: false,
-        message: 'Preview is not allowed for this share'
+        message: 'Preview is not allowed for this share',
+        code: 'PREVIEW_NOT_ALLOWED'
       });
     }
     
@@ -546,7 +571,8 @@ const downloadSharedFile = async (req, res) => {
       console.log('❌ Download not allowed');
       return res.status(403).json({
         success: false,
-        message: 'Download is not allowed for this share'
+        message: 'Download is not allowed for this share',
+        code: 'DOWNLOAD_NOT_ALLOWED'
       });
     }
     console.log('✅ Permissions verified');
@@ -557,7 +583,8 @@ const downloadSharedFile = async (req, res) => {
       console.log('❌ Share is locked due to failed attempts');
       return res.status(429).json({
         success: false,
-        message: 'Too many failed attempts. Please try again later.'
+        message: 'Too many failed attempts. Please try again later.',
+        code: 'BRUTE_FORCE_LOCKED'
       });
     }
     console.log('✅ Not locked');
@@ -572,7 +599,8 @@ const downloadSharedFile = async (req, res) => {
       
       return res.status(401).json({
         success: false,
-        message: 'Invalid share password'
+        message: 'Invalid share password',
+        code: 'INVALID_PASSWORD'
       });
     }
     console.log('✅ Password verified successfully');
@@ -581,28 +609,50 @@ const downloadSharedFile = async (req, res) => {
     await sharedFile.resetFailedAttempts();
 
     // STEP 9: Retrieve encrypted file from S3
-    console.log('📥 STEP 9: Retrieving encrypted file from AWS S3...');
+    console.log('📥 STEP 9: Checking if file still exists...');
     
     // Verify fileId is populated
     if (!sharedFile.fileId) {
-      console.log('❌ File not found in share');
-      return res.status(404).json({
+      console.log('❌ File reference not found in share');
+      return res.status(410).json({
         success: false,
-        message: 'File associated with this share not found'
+        message: 'This file has been deleted by the owner',
+        code: 'FILE_DELETED',
+        details: 'The file associated with this share link no longer exists'
       });
     }
+    
+    // Check if file is deleted
+    const fileRecord = await File.findById(sharedFile.fileId._id);
+    if (!fileRecord || fileRecord.isDeleted) {
+      console.log('❌ Original file has been deleted');
+      return res.status(410).json({
+        success: false,
+        message: 'This file has been deleted by the owner',
+        code: 'FILE_DELETED',
+        details: 'The original file is no longer available'
+      });
+    }
+    
+    console.log('📥 STEP 10: Retrieving encrypted file from AWS S3...');
     
     if (!sharedFile.fileId.s3Key) {
       console.log('❌ S3 key not found for file');
       return res.status(500).json({
         success: false,
-        message: 'File storage key not found'
+        message: 'File storage configuration error',
+        code: 'S3_KEY_MISSING',
+        details: 'Unable to retrieve file from storage'
       });
     }
     
     let s3Result;
     try {
-      s3Result = await downloadFromUserS3(sharedFile.ownerUserId._id, sharedFile.fileId.s3Key);
+      // Get bucketId from file
+      const bucketId = fileRecord?.bucketId;
+      
+      console.log(`📥 Using bucketId from file: ${bucketId}`);
+      s3Result = await downloadFromUserS3(sharedFile.ownerUserId._id, sharedFile.fileId.s3Key, bucketId);
       
       console.log('📥 S3 Result:', {
         success: s3Result?.success,
@@ -612,10 +662,29 @@ const downloadSharedFile = async (req, res) => {
       });
       
       if (!s3Result || !s3Result.success) {
-        console.log('❌ S3 download failed:', s3Result?.error || 'Unknown error');
+        const s3Error = s3Result?.error || 'Unknown storage error';
+        console.log('❌ S3 download failed:', s3Error);
+        
+        // Provide specific error messages based on S3 error type
+        let errorMessage = 'Unable to retrieve file from storage';
+        let errorCode = 'S3_ACCESS_ERROR';
+        
+        if (s3Error.includes('NotFound') || s3Error.includes('NoSuchKey')) {
+          errorMessage = 'File not found in storage. It may have been deleted.';
+          errorCode = 'S3_FILE_NOT_FOUND';
+        } else if (s3Error.includes('Access') || s3Error.includes('Denied')) {
+          errorMessage = 'Access denied to file storage. Please contact the file owner.';
+          errorCode = 'S3_ACCESS_DENIED';
+        } else if (s3Error.includes('Timeout')) {
+          errorMessage = 'Storage service timeout. Please try again later.';
+          errorCode = 'S3_TIMEOUT';
+        }
+        
         return res.status(500).json({
           success: false,
-          message: 'Failed to download file from storage: ' + (s3Result?.error || 'Unknown error')
+          message: errorMessage,
+          code: errorCode,
+          details: s3Error
         });
       }
       
@@ -623,7 +692,9 @@ const downloadSharedFile = async (req, res) => {
         console.log('❌ S3 returned success but no file buffer');
         return res.status(500).json({
           success: false,
-          message: 'Failed to retrieve file from storage: Empty file buffer'
+          message: 'Storage returned empty file',
+          code: 'S3_EMPTY_FILE',
+          details: 'File buffer is empty or corrupted'
         });
       }
       
@@ -631,14 +702,29 @@ const downloadSharedFile = async (req, res) => {
     } catch (error) {
       console.log('❌ S3 download error:', error.message);
       console.error('Error stack:', error.stack);
+      
+      // Provide specific error messages for different exception types
+      let errorMessage = 'Failed to download file from storage';
+      let errorCode = 'S3_EXCEPTION';
+      
+      if (error.message.includes('ECONNREFUSED')) {
+        errorMessage = 'Cannot connect to storage service. Please try again.';
+        errorCode = 'S3_CONNECTION_ERROR';
+      } else if (error.message.includes('ETIMEDOUT')) {
+        errorMessage = 'Storage service request timed out. Please try again.';
+        errorCode = 'S3_TIMEOUT';
+      }
+      
       return res.status(500).json({
         success: false,
-        message: 'Failed to download file from storage: ' + error.message
+        message: errorMessage,
+        code: errorCode,
+        details: error.message
       });
     }
 
     // STEP 10: Get file's encryption password
-    console.log('🔓 STEP 10: Retrieving file encryption password...');
+    console.log('🔓 STEP 11: Retrieving file encryption password...');
     let fileEncryptionPassword = sharedFile.fileEncryptionPassword;
     
     // Fallback: If not stored in SharedFile, try to get from File model
@@ -659,25 +745,42 @@ const downloadSharedFile = async (req, res) => {
       console.log('❌ File encryption password not found anywhere');
       return res.status(500).json({
         success: false,
-        message: 'Unable to decrypt file - encryption password not available. Please contact the file owner.'
+        message: 'Unable to decrypt file - encryption password not available. Please contact the file owner.',
+        code: 'ENCRYPTION_PASSWORD_MISSING',
+        details: 'The encryption key needed to decrypt this file is not available'
       });
     }
     console.log('✅ File encryption password retrieved');
 
     // STEP 11: Decrypt file temporarily in backend memory
-    console.log('🔓 STEP 11: Decrypting file in memory...');
-    const decryptResult = decryptFile(s3Result.fileBuffer, fileEncryptionPassword);
-    
-    if (!decryptResult.success) {
-      console.log('❌ Decryption failed:', decryptResult.error);
+    console.log('🔓 STEP 12: Decrypting file in memory...');
+    let decryptResult;
+    try {
+      decryptResult = decryptFile(s3Result.fileBuffer, fileEncryptionPassword);
+      
+      if (!decryptResult.success) {
+        console.log('❌ Decryption failed:', decryptResult.error);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to decrypt file: File may be corrupted or password is incorrect',
+          code: 'DECRYPTION_FAILED',
+          details: decryptResult.error
+        });
+      }
+      
+      decryptedBuffer = decryptResult.decryptedBuffer;
+      console.log(`✅ File decrypted successfully (${decryptedBuffer.length} bytes)`);
+    } catch (error) {
+      console.log('❌ Decryption exception:', error.message);
+      console.error('Error stack:', error.stack);
+      
       return res.status(500).json({
         success: false,
-        message: 'Failed to decrypt file: ' + decryptResult.error
+        message: 'An error occurred while decrypting the file. Please try again.',
+        code: 'DECRYPTION_ERROR',
+        details: error.message
       });
     }
-    
-    decryptedBuffer = decryptResult.decryptedBuffer;
-    console.log(`✅ File decrypted successfully (${decryptedBuffer.length} bytes)`);
 
     // STEP 12: Stream decrypted file securely to browser
     console.log('📤 STEP 12: Streaming file to browser...');
@@ -732,12 +835,40 @@ const downloadSharedFile = async (req, res) => {
     // Ensure decrypted buffer is cleared from memory
     decryptedBuffer = null;
     
-    // Send error response
+    // Send error response with helpful details
     if (!res.headersSent) {
-      res.status(500).json({
+      // Categorize error for better user feedback
+      let statusCode = 500;
+      let errorCode = 'DOWNLOAD_ERROR';
+      let errorMessage = 'An error occurred while processing your request. Please try again.';
+      let errorDetails = error.message;
+      
+      // Handle specific error types
+      if (error.message.includes('ENOENT')) {
+        errorCode = 'FILE_NOT_FOUND';
+        errorMessage = 'The requested file could not be found.';
+      } else if (error.message.includes('EACCES')) {
+        errorCode = 'ACCESS_DENIED';
+        errorMessage = 'Access to the file was denied.';
+      } else if (error.message.includes('timeout')) {
+        statusCode = 504;
+        errorCode = 'REQUEST_TIMEOUT';
+        errorMessage = 'The request timed out. Please try again.';
+      } else if (error.name === 'ValidationError') {
+        statusCode = 400;
+        errorCode = 'VALIDATION_ERROR';
+        errorMessage = 'Invalid request data.';
+      } else if (error.name === 'CastError') {
+        statusCode = 400;
+        errorCode = 'INVALID_ID';
+        errorMessage = 'Invalid file identifier.';
+      }
+      
+      res.status(statusCode).json({
         success: false,
-        message: 'Failed to download file: ' + error.message,
-        error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        message: errorMessage,
+        code: errorCode,
+        details: process.env.NODE_ENV === 'development' ? errorDetails : undefined
       });
     }
   } finally {
@@ -760,21 +891,34 @@ const getMyShares = async (req, res) => {
     
     const skip = (page - 1) * limit;
     
-    // Get shared files
+    // CRITICAL: Get shared files and populate fileId to check if file exists
     const sharedFiles = await SharedFile.find({ ownerUserId: userId })
-      .populate('fileId', 'fileName fileSize fileType originalName')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
+      .populate('fileId', 'fileName fileSize fileType originalName isDeleted')
+      .sort({ createdAt: -1 });
     
-    // Get total count
-    const total = await SharedFile.countDocuments({ ownerUserId: userId });
+    // CRITICAL: Filter out shares where the file has been deleted or doesn't exist
+    const validShares = sharedFiles.filter(share => {
+      if (!share.fileId) {
+        console.log(`⚠️ Orphaned share detected: ${share._id} - file reference is null`);
+        return false;
+      }
+      if (share.fileId.isDeleted) {
+        console.log(`⚠️ Share for deleted file: ${share._id} - file marked as deleted`);
+        return false;
+      }
+      return true;
+    });
+    
+    console.log(`📊 Total shares: ${sharedFiles.length}, Valid shares: ${validShares.length}`);
+    
+    // Apply pagination to filtered results
+    const paginatedShares = validShares.slice(skip, skip + parseInt(limit));
     
     console.log('✅ Shares retrieved successfully');
     
     res.status(200).json({
       success: true,
-      data: sharedFiles.map(share => ({
+      data: paginatedShares.map(share => ({
         id: share._id,
         shareToken: share.shareToken,
         fileName: share.fileId.fileName,
@@ -793,8 +937,8 @@ const getMyShares = async (req, res) => {
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit)
+        total: validShares.length,  // CHANGED: Count of valid shares, not all shares
+        pages: Math.ceil(validShares.length / parseInt(limit))  // CHANGED: Pages calculated on valid shares
       }
     });
     
@@ -890,6 +1034,63 @@ const deleteShare = async (req, res) => {
   }
 };
 
+/**
+ * Audit share links - find orphaned shares (shares for deleted files)
+ * GET /api/shared-files/audit/orphaned
+ */
+const auditShares = async (req, res) => {
+  try {
+    console.log('🔍 ===== AUDIT SHARES REQUEST START =====');
+    
+    const userId = req.user._id;
+    const shareCleanupService = require('../services/shareCleanupService');
+    
+    const auditResult = await shareCleanupService.auditShareLinks(userId);
+    
+    res.status(200).json({
+      success: true,
+      data: auditResult
+    });
+    
+  } catch (error) {
+    console.error('❌ Audit shares error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to audit shares',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Clean up orphaned shares - deactivate shares for deleted files
+ * POST /api/shared-files/cleanup/orphaned
+ */
+const cleanupOrphanedShares = async (req, res) => {
+  try {
+    console.log('🧹 ===== CLEANUP ORPHANED SHARES REQUEST START =====');
+    
+    const userId = req.user._id;
+    const shareCleanupService = require('../services/shareCleanupService');
+    
+    const cleanupResult = await shareCleanupService.cleanupOrphanedShares(userId);
+    
+    res.status(200).json({
+      success: true,
+      data: cleanupResult,
+      message: `Cleaned up ${cleanupResult.cleanedCount} orphaned share link(s)`
+    });
+    
+  } catch (error) {
+    console.error('❌ Cleanup orphaned shares error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to cleanup orphaned shares',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   createShareLink,
   generateShareLink,
@@ -898,5 +1099,7 @@ module.exports = {
   downloadSharedFile,
   getMyShares,
   deactivateShare,
-  deleteShare
+  deleteShare,
+  auditShares,
+  cleanupOrphanedShares
 };

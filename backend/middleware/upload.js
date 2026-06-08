@@ -2,20 +2,59 @@ const multer = require('multer');
 const mime = require('mime-types');
 const path = require('path');
 
-// File type validation
+// File type validation - COMPREHENSIVE whitelist
 const allowedMimeTypes = [
   // Images
-  'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+  'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp', 'image/tiff',
   // Documents
   'application/pdf',
-  'text/plain', 'text/csv',
+  'text/plain', 'text/csv', 'text/html', 'text/xml',
   'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  // .docx
   'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  // Media
-  'video/mp4', 'video/avi', 'video/mov', 'video/wmv', 'video/quicktime',
-  'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/m4a'
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  // .xlsx
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',  // .pptx
+  'application/rtf',
+  'application/vnd.oasis.opendocument.text',  // .odt
+  'application/vnd.oasis.opendocument.spreadsheet',  // .ods
+  'application/vnd.oasis.opendocument.presentation',  // .odp
+  // Archives
+  'application/zip',
+  'application/x-rar-compressed',
+  'application/x-7z-compressed',
+  'application/x-tar',
+  'application/gzip',
+  'application/x-bzip2',
+  // Media - Video
+  'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo',  // .avi
+  'video/x-matroska',  // .mkv
+  'video/webm',
+  'video/x-flv',
+  'video/3gpp',
+  'video/3gpp2',
+  // Media - Audio
+  'audio/mpeg',  // .mp3
+  'audio/mp4',  // .m4a
+  'audio/wav', 'audio/x-wav',
+  'audio/ogg',
+  'audio/x-flac',  // .flac
+  'audio/aac',  // .aac
+  'audio/flac',
+  // Code/Config files
+  'text/javascript',
+  'application/json',
+  'application/xml',
+  'text/yaml',
+  'text/x-python',
+  'text/x-java-source',
+  'text/x-c++src',
+  'text/x-csrc',
+  'text/x-php',
+  'text/css',
+  'text/x-shellscript',
+  // Additional safe types
+  'application/octet-stream'  // Generic binary fallback
 ];
 
 // File size limits (in bytes)

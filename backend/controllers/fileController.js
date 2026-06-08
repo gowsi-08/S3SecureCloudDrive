@@ -47,42 +47,66 @@ const uploadFiles = async (req, res) => {
       console.log('❌ NO FILES PROVIDED - returning 400');
       return res.status(400).json({
         success: false,
-        message: 'No files provided'
+        message: 'No files provided',
+        code: 'NO_FILES_PROVIDED'
       });
     }
 
-    const { folderId, password, isCustomPassword } = req.body;
+    const { folderId, password, isCustomPassword, folderPaths } = req.body;
     const userId = req.user._id;
+    // CRITICAL: Use bucketId from middleware (already validated and set)
+    const bucketId = req.bucketId;
+    
+    // CRITICAL VALIDATION: bucketId MUST be set by middleware
+    if (!bucketId) {
+      console.log('❌ CRITICAL ERROR: bucketId not set by middleware');
+      return res.status(500).json({
+        success: false,
+        message: 'Bucket configuration error. Please try again.',
+        code: 'BUCKET_NOT_CONFIGURED'
+      });
+    }
+    
+    // Parse folder paths array if provided (from folder upload)
+    const folderPathsArray = folderPaths ? (Array.isArray(folderPaths) ? folderPaths : [folderPaths]) : [];
+    
+    console.log(`📍 ===== BUCKET SELECTION DETAILS =====`);
+    console.log(`   From middleware: ${req.bucketId}`);
+    console.log(`   Final selected: ${bucketId}`);
+    console.log(`   Bucket validation: ${bucketId ? '✅ VALID' : '❌ MISSING'}`);
+    console.log(`   Total files to upload: ${req.files.length}`);
+    console.log(`   Folder paths provided: ${folderPathsArray.length}`);
+    console.log(`📍 ===== END BUCKET SELECTION =====`);
 
     if (!password) {
       console.log('❌ NO PASSWORD PROVIDED - returning 400');
       return res.status(400).json({
         success: false,
-        message: 'Password required for file encryption'
+        message: 'Password required for file encryption',
+        code: 'PASSWORD_REQUIRED'
       });
     }
 
-    // Determine if this is a custom password (stricter validation)
-    const isCustom = isCustomPassword === 'true' || isCustomPassword === true;
-    console.log(`📝 Password type: ${isCustom ? 'CUSTOM (12+ chars required)' : 'ACCOUNT (8+ chars required)'}`);
-
     // Validate folder if provided
     if (folderId) {
-      const folder = await Folder.findOne({ _id: folderId, userId, isDeleted: false });
+      const folder = await Folder.findOne({ _id: folderId, userId, bucketId, isDeleted: false });
       if (!folder) {
         console.log('❌ FOLDER NOT FOUND - returning 404');
         return res.status(404).json({
           success: false,
-          message: 'Folder not found'
+          message: 'Folder not found in this bucket',
+          code: 'FOLDER_NOT_FOUND'
         });
       }
+      console.log(`✅ Folder validated in bucket ${bucketId}`);
     }
 
     const uploadResults = [];
     const errors = [];
 
     // Process each file
-    for (const file of req.files) {
+    for (let index = 0; index < req.files.length; index++) {
+      const file = req.files[index];
       try {
         console.log(`\n📄 Processing file: ${file.originalname}`);
         
@@ -120,7 +144,7 @@ const uploadFiles = async (req, res) => {
 
         // Encrypt file
         console.log(`🔐 Encrypting file...`);
-        const encryptionResult = encryptFile(file.buffer, password, null, !isCustom);
+        const encryptionResult = encryptFile(file.buffer, password, null, !isCustomPassword);
         
         if (!encryptionResult.success) {
           console.log(`❌ Encryption failed: ${encryptionResult.error}`);
@@ -132,8 +156,11 @@ const uploadFiles = async (req, res) => {
         }
         console.log(`✅ Encryption successful`);
 
-        // Generate S3 key using user's bucket structure
-        const s3Key = generateUserS3Key(userId, finalFileName, folderId);
+        // Get folder path if provided (from folder upload)
+        const folderPath = folderPathsArray[index] || '';
+        
+        // Generate S3 key using user's bucket structure + preserve folder path
+        const s3Key = generateUserS3Key(userId, finalFileName, folderId, folderPath);
         console.log(`📍 S3 Key: ${s3Key}`);
 
         // Upload to user's S3 bucket
@@ -142,7 +169,8 @@ const uploadFiles = async (req, res) => {
           userId,
           encryptionResult.encryptedBuffer,
           s3Key,
-          'application/octet-stream'
+          'application/octet-stream',
+          bucketId  // Pass the bucket ID
         );
 
         if (!uploadResult.success) {
@@ -155,8 +183,12 @@ const uploadFiles = async (req, res) => {
         }
         console.log(`✅ S3 upload successful`);
 
-        // Save file metadata to database
+        // Save file metadata to database with MANDATORY bucket isolation
         console.log(`💾 Saving metadata to database...`);
+        console.log(`   Final bucketId: ${bucketId}`);
+        console.log(`   bucketId type: ${typeof bucketId}`);
+        
+        // CRITICAL: Always use bucketId from middleware, never from FormData
         const fileDoc = new File({
           userId,
           fileName: finalFileName,
@@ -165,12 +197,15 @@ const uploadFiles = async (req, res) => {
           fileSize: file.size,
           s3Key,
           folderId: folderId || null,
+          bucketId: bucketId,  // MANDATORY: Use validated bucketId from middleware
           isEncrypted: true,
           encryptionIV: encryptionResult.iv,
-          encryptionPassword: password // Store the encryption password for later decryption
+          encryptionPassword: password
         });
 
+        console.log(`   Saving with bucketId: ${fileDoc.bucketId}`);
         await fileDoc.save();
+        console.log(`   ✅ File saved with bucketId: ${fileDoc.bucketId}`);
         console.log(`✅ Metadata saved, File ID: ${fileDoc._id}`);
 
         uploadResults.push({
@@ -246,11 +281,29 @@ const getFiles = async (req, res) => {
   try {
     const { folderId } = req.query;
     const userId = req.user._id;
+    const bucketId = req.bucketId;  // Use bucketId from middleware (required)
+
+    console.log(`\n📄 GET FILES:`);
+    console.log(`   userId: ${userId}`);
+    console.log(`   folderId: ${folderId}`);
+    console.log(`   bucketId from middleware: ${bucketId}`);
+    console.log(`   bucketId is null/undefined: ${!bucketId}`);
+
+    // CRITICAL: Ensure bucketId is present - THIS IS THE BUCKET ISOLATION GATEKEEPER
+    if (!bucketId) {
+      console.log(`   🔴 CRITICAL ERROR: bucketId is missing!`);
+      console.log(`   This would cause ALL files from ALL buckets to be returned!`);
+      return res.status(400).json({
+        success: false,
+        message: 'Bucket ID is required - middleware failed to set bucketId'
+      });
+    }
 
     // Validate folder if provided
     if (folderId && folderId !== 'null') {
       const folder = await Folder.findOne({ _id: folderId, userId, isDeleted: false });
       if (!folder) {
+        console.log(`   ❌ Folder not found`);
         return res.status(404).json({
           success: false,
           message: 'Folder not found'
@@ -258,11 +311,17 @@ const getFiles = async (req, res) => {
       }
     }
 
-    const files = await File.find({
+    // ALWAYS filter by bucketId from middleware (CRITICAL for isolation)
+    const query = {
       userId,
+      bucketId,  // Mandatory bucket filtering
       folderId: folderId && folderId !== 'null' ? folderId : null,
       isDeleted: false
-    }).sort({ uploadedAt: -1 });
+    };
+
+    console.log(`   Query: ${JSON.stringify(query)}`);
+    const files = await File.find(query).sort({ uploadedAt: -1 });
+    console.log(`   Found ${files.length} files`);
 
     const formattedFiles = files.map(file => ({
       id: file._id,
@@ -342,7 +401,7 @@ const downloadFile = async (req, res) => {
     console.log('📥 STEP 4: Retrieving encrypted file from AWS S3...');
     let s3Result;
     try {
-      s3Result = await downloadFromUserS3(userId, file.s3Key);
+      s3Result = await downloadFromUserS3(userId, file.s3Key, file.bucketId);
       
       console.log('📥 S3 Result:', {
         success: s3Result?.success,
@@ -472,34 +531,75 @@ const deleteFile = async (req, res) => {
   try {
     const { fileId } = req.params;
     const userId = req.user._id;
+    const bucketId = req.bucketId;
+
+    console.log(`\n🗑️ DELETE FILE:`);
+    console.log(`   fileId: ${fileId}`);
+    console.log(`   userId: ${userId}`);
+    console.log(`   bucketId from middleware: ${bucketId}`);
+
+    if (!bucketId) {
+      console.log(`   🔴 CRITICAL ERROR: bucketId is missing!`);
+      return res.status(400).json({
+        success: false,
+        message: 'Bucket ID is required'
+      });
+    }
 
     // Find file
-    const file = await File.findOne({ _id: fileId, userId, isDeleted: false });
+    const file = await File.findOne({ _id: fileId, userId, bucketId, isDeleted: false });
     if (!file) {
+      console.log(`   ❌ File not found`);
       return res.status(404).json({
         success: false,
         message: 'File not found'
       });
     }
+    console.log(`   ✅ File found: ${file.fileName}`);
 
-    // Delete from user's S3 bucket
-    const deleteResult = await deleteFromUserS3(userId, file.s3Key);
-    if (!deleteResult.success) {
-      console.error('Failed to delete from S3:', deleteResult.error);
+    // STEP 1: Find and HARD DELETE all share links for this file
+    console.log(`   🔐 STEP 1-7: Hard deleting all share links...`);
+    const shareCleanupService = require('../services/shareCleanupService');
+    const cleanupResult = await shareCleanupService.cleanupShareLinksForFile(file._id, 'original_file_deleted');
+    console.log(`   📊 Share cleanup result:`, cleanupResult);
+    
+    if (cleanupResult.deletedCount > 0) {
+      console.log(`   ✅ ${cleanupResult.deletedCount} share link(s) HARD DELETED`);
     }
 
-    // Mark as deleted in database
+    // STEP 8: Delete from S3
+    console.log(`   ☁️ STEP 8: Deleting from S3...`);
+    const { deleteFromUserS3 } = require('../services/dynamicS3Client');
+    const deleteResult = await deleteFromUserS3(userId, file.s3Key, file.bucketId);
+    if (!deleteResult.success) {
+      console.error(`   ⚠️ S3 deletion warning: ${deleteResult.error}`);
+    } else {
+      console.log(`   ✅ Deleted from S3`);
+    }
+
+    // STEP 9: Mark as deleted in database (soft delete for audit)
+    console.log(`   💾 STEP 9: Marking file as deleted...`);
     file.isDeleted = true;
     file.deletedAt = new Date();
     await file.save();
+    console.log(`   ✅ File marked as deleted`);
 
+    console.log(`   ✅ DELETE COMPLETE - ${cleanupResult.deletedCount} share link(s) removed`);
     res.json({
       success: true,
-      message: 'File deleted successfully'
+      message: cleanupResult.deletedCount > 0 
+        ? `File deleted successfully. ${cleanupResult.deletedCount} share link(s) have been permanently removed.`
+        : 'File deleted successfully.',
+      data: {
+        fileId: file._id,
+        fileName: file.fileName,
+        shareLinksRemoved: cleanupResult.deletedCount,
+        deletedAt: file.deletedAt
+      }
     });
 
   } catch (error) {
-    console.error('Delete file error:', error);
+    console.error('❌ Delete file error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error deleting file'
@@ -625,6 +725,18 @@ const searchFiles = async (req, res) => {
   try {
     const { query, fileType, folderId } = req.query;
     const userId = req.user._id;
+    const bucketId = req.bucketId;  // Use bucketId from middleware (REQUIRED)
+
+    console.log(`🔍 Search: query="${query}", bucketId=${bucketId}`);
+    
+    // CRITICAL: Ensure bucketId is present
+    if (!bucketId) {
+      console.log(`   🔴 CRITICAL ERROR: bucketId is missing in search!`);
+      return res.status(400).json({
+        success: false,
+        message: 'Bucket ID is required for search operations'
+      });
+    }
 
     if (!query || query.trim() === '') {
       return res.status(400).json({
@@ -633,9 +745,10 @@ const searchFiles = async (req, res) => {
       });
     }
 
-    // Build search criteria
+    // Build search criteria with bucket isolation
     const searchCriteria = {
       userId,
+      bucketId,  // Mandatory bucket filtering
       isDeleted: false,
       $or: [
         { fileName: { $regex: query, $options: 'i' } },

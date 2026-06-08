@@ -6,6 +6,7 @@ const { getS3ClientForUser } = require('../services/dynamicS3Client');
 /**
  * Connect user's AWS S3 bucket
  * POST /api/cloud-config/connect
+ * Now supports multiple buckets per user
  */
 const connectBucket = async (req, res) => {
   try {
@@ -61,13 +62,23 @@ const connectBucket = async (req, res) => {
 
     console.log('✅ Credentials encrypted');
 
-    // Check if user already has a config
-    let cloudConfig = await UserCloudConfig.findOne({ userId });
+    // Check if this specific bucket is already connected
+    let cloudConfig = await UserCloudConfig.findOne({ 
+      userId,
+      bucketName 
+    });
+
+    if (cloudConfig && cloudConfig.isConnected) {
+      console.log('⚠️ Bucket already connected');
+      return res.status(400).json({
+        success: false,
+        message: 'This bucket is already connected to your account'
+      });
+    }
 
     if (cloudConfig) {
       console.log('📝 Updating existing config');
       // Update existing config
-      cloudConfig.bucketName = bucketName;
       cloudConfig.region = region;
       cloudConfig.encryptedCredentials = encryptionResult.encryptedCredentials;
       cloudConfig.encryptionIV = encryptionResult.encryptionIV;
@@ -81,7 +92,7 @@ const connectBucket = async (req, res) => {
       cloudConfig.verifiedPermissions = validationResult.permissions;
     } else {
       console.log('📝 Creating new config');
-      // Create new config
+      // Create new config for this bucket
       cloudConfig = new UserCloudConfig({
         userId,
         bucketName,
@@ -106,6 +117,7 @@ const connectBucket = async (req, res) => {
       success: true,
       message: 'AWS S3 bucket connected successfully',
       data: {
+        id: cloudConfig._id,
         bucketName: cloudConfig.bucketName,
         region: cloudConfig.region,
         isConnected: cloudConfig.isConnected,
@@ -126,19 +138,34 @@ const connectBucket = async (req, res) => {
 /**
  * Get connection status
  * GET /api/cloud-config/status
+ * Returns all connected buckets for the user
  */
 const getConnectionStatus = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    const cloudConfig = await UserCloudConfig.findOne({ userId });
+    const cloudConfigs = await UserCloudConfig.find({ userId });
 
-    if (!cloudConfig) {
+    const connectedBuckets = cloudConfigs
+      .filter(config => config.isConnected)
+      .map(config => ({
+        id: config._id,
+        bucketName: config.bucketName,
+        region: config.region,
+        connectionStatus: config.connectionStatus,
+        connectedAt: config.connectedAt,
+        lastValidated: config.lastValidated,
+        permissionsVerified: config.permissionsVerified,
+        verifiedPermissions: config.verifiedPermissions
+      }));
+
+    if (connectedBuckets.length === 0) {
       return res.json({
         success: true,
         data: {
           isConnected: false,
-          message: 'No bucket connected'
+          buckets: [],
+          message: 'No buckets connected'
         }
       });
     }
@@ -146,14 +173,9 @@ const getConnectionStatus = async (req, res) => {
     res.json({
       success: true,
       data: {
-        isConnected: cloudConfig.isConnected,
-        bucketName: cloudConfig.bucketName,
-        region: cloudConfig.region,
-        connectionStatus: cloudConfig.connectionStatus,
-        connectedAt: cloudConfig.connectedAt,
-        lastValidated: cloudConfig.lastValidated,
-        permissionsVerified: cloudConfig.permissionsVerified,
-        verifiedPermissions: cloudConfig.verifiedPermissions
+        isConnected: true,
+        bucketCount: connectedBuckets.length,
+        buckets: connectedBuckets
       }
     });
 
@@ -245,18 +267,30 @@ const testConnection = async (req, res) => {
 
 /**
  * Disconnect bucket
- * POST /api/cloud-config/disconnect
+ * POST /api/cloud-config/disconnect/:bucketId
+ * Allows disconnecting a specific bucket
  */
 const disconnectBucket = async (req, res) => {
   try {
     const userId = req.user._id;
+    const { bucketId } = req.params;
 
-    const cloudConfig = await UserCloudConfig.findOne({ userId });
+    if (!bucketId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Bucket ID is required'
+      });
+    }
+
+    const cloudConfig = await UserCloudConfig.findOne({
+      _id: bucketId,
+      userId
+    });
 
     if (!cloudConfig) {
       return res.status(404).json({
         success: false,
-        message: 'No bucket configuration found'
+        message: 'Bucket configuration not found'
       });
     }
 
@@ -265,9 +299,14 @@ const disconnectBucket = async (req, res) => {
     cloudConfig.connectionStatus = 'disconnected';
     await cloudConfig.save();
 
+    console.log(`✅ Bucket disconnected: ${cloudConfig.bucketName}`);
+
     res.json({
       success: true,
-      message: 'Bucket disconnected successfully'
+      message: `Bucket '${cloudConfig.bucketName}' disconnected successfully`,
+      data: {
+        bucketName: cloudConfig.bucketName
+      }
     });
 
   } catch (error) {
@@ -428,6 +467,95 @@ const updateBucketConfig = async (req, res) => {
   }
 };
 
+/**
+ * Fix credential decryption issue
+ * POST /api/cloud-config/fix-credentials
+ * This endpoint helps fix "Unsupported state or unable to authenticate data" errors
+ */
+const fixCredentials = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { accessKeyId, secretAccessKey } = req.body;
+
+    if (!accessKeyId || !secretAccessKey) {
+      return res.status(400).json({
+        success: false,
+        message: 'Access Key ID and Secret Access Key are required'
+      });
+    }
+
+    const cloudConfig = await UserCloudConfig.findOne({ userId });
+
+    if (!cloudConfig) {
+      return res.status(404).json({
+        success: false,
+        message: 'No bucket configuration found'
+      });
+    }
+
+    console.log('🔧 Fixing credentials for user:', userId);
+    console.log('📝 Re-encrypting with current master key...');
+
+    // Re-encrypt credentials with current master key
+    const encryptionResult = encryptCredentials(accessKeyId, secretAccessKey);
+
+    if (!encryptionResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to encrypt credentials: ' + encryptionResult.error
+      });
+    }
+
+    // Validate new credentials before saving
+    console.log('🧪 Validating new credentials...');
+    const validationResult = await validateBucketConnection(
+      accessKeyId,
+      secretAccessKey,
+      cloudConfig.bucketName,
+      cloudConfig.region
+    );
+
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: 'Credentials validation failed: ' + validationResult.error,
+        missingPermissions: validationResult.missingPermissions
+      });
+    }
+
+    // Update with new encrypted credentials
+    cloudConfig.encryptedCredentials = encryptionResult.encryptedCredentials;
+    cloudConfig.encryptionIV = encryptionResult.encryptionIV;
+    cloudConfig.encryptionAuthTag = encryptionResult.encryptionAuthTag;
+    cloudConfig.isConnected = true;
+    cloudConfig.connectionStatus = 'connected';
+    cloudConfig.lastValidated = new Date();
+    cloudConfig.validationError = null;
+    cloudConfig.permissionsVerified = true;
+    cloudConfig.verifiedPermissions = validationResult.permissions;
+
+    await cloudConfig.save();
+    console.log('✅ Credentials fixed and saved');
+
+    res.json({
+      success: true,
+      message: 'Credentials have been successfully fixed and re-encrypted',
+      data: {
+        bucketName: cloudConfig.bucketName,
+        region: cloudConfig.region,
+        isConnected: cloudConfig.isConnected
+      }
+    });
+
+  } catch (error) {
+    console.error('Fix credentials error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error fixing credentials: ' + error.message
+    });
+  }
+};
+
 module.exports = {
   connectBucket,
   getConnectionStatus,
@@ -435,5 +563,6 @@ module.exports = {
   disconnectBucket,
   getIAMPolicy,
   getBucketStatistics,
-  updateBucketConfig
+  updateBucketConfig,
+  fixCredentials
 };

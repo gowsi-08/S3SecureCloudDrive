@@ -124,9 +124,23 @@ mongoose
   .connect("mongodb://localhost:27017/s3DriveProject", {
    
   })
-  .then(() => {
+  .then(async () => {
     console.log("✅ MongoDB Connected Successfully");
     console.log(`📊 Database: ${mongoose.connection.name}`);
+    
+    // Run index migration for folders (drops old index, cleans duplicates, creates new index with bucketId)
+    try {
+      const Folder = require('./models/Folder');
+      const migrationResult = await Folder.migrateIndexes();
+      if (migrationResult.success) {
+        console.log('✅ Folder indexes migrated successfully');
+      } else {
+        console.log('⚠️ Folder index migration failed:', migrationResult.error);
+      }
+    } catch (error) {
+      console.error('❌ Error running index migration:', error.message);
+      // Don't exit - let server continue, user can manually fix
+    }
   })
   .catch((err) => {
     console.error("❌ MongoDB Connection Error:", err.message);

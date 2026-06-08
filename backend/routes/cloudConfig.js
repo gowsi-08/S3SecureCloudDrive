@@ -8,7 +8,8 @@ const {
   disconnectBucket,
   getIAMPolicy,
   getBucketStatistics,
-  updateBucketConfig
+  updateBucketConfig,
+  fixCredentials
 } = require('../controllers/cloudConfigController');
 
 const { protect } = require('../middleware/auth');
@@ -20,9 +21,10 @@ router.use(protect);
 router.post('/connect', connectBucket);
 router.get('/status', getConnectionStatus);
 router.post('/test', testConnection);
-router.post('/disconnect', disconnectBucket);
+router.post('/disconnect/:bucketId', disconnectBucket);
 router.get('/iam-policy', getIAMPolicy);
 router.get('/stats', getBucketStatistics);
 router.put('/update', updateBucketConfig);
+router.post('/fix-credentials', fixCredentials);
 
 module.exports = router;

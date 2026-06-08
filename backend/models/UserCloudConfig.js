@@ -6,7 +6,6 @@ const userCloudConfigSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
-      unique: true,
       index: true
     },
     bucketName: {
@@ -78,5 +77,6 @@ const userCloudConfigSchema = new mongoose.Schema(
 
 // Index for quick lookups
 userCloudConfigSchema.index({ userId: 1, isConnected: 1 });
+userCloudConfigSchema.index({ userId: 1, bucketName: 1 });
 
 module.exports = mongoose.model('UserCloudConfig', userCloudConfigSchema);

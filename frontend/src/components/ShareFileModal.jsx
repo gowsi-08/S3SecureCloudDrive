@@ -79,6 +79,7 @@ const ShareFileModal = ({ isOpen, onClose, file, onShareSuccess }) => {
 
       const response = await fileAPI.createShareLink({
         fileId: fileId,
+        bucketId: file?.bucketId,
         sharePassword,
         expirationOption: expirationOption === 'never' ? null : expirationOption,
         maxDownloads: maxDownloads ? parseInt(maxDownloads) : null,

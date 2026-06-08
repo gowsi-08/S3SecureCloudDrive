@@ -11,6 +11,8 @@ const BucketConnectionModal = ({ isOpen, onClose, onSuccess }) => {
     accessKeyId: '',
     secretAccessKey: ''
   });
+  const [additionalBuckets, setAdditionalBuckets] = useState([]);
+  const [tempBucketName, setTempBucketName] = useState('');
   const [showSecret, setShowSecret] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -22,12 +24,18 @@ const BucketConnectionModal = ({ isOpen, onClose, onSuccess }) => {
       {
         Effect: 'Allow',
         Action: ['s3:ListBucket', 's3:GetBucketLocation'],
-        Resource: `arn:aws:s3:::${formData.bucketName || 'YOUR-BUCKET-NAME'}`
+        Resource: [
+          `arn:aws:s3:::${formData.bucketName || 'YOUR-BUCKET-NAME'}`,
+          ...additionalBuckets.map(bucket => `arn:aws:s3:::${bucket}`)
+        ]
       },
       {
         Effect: 'Allow',
         Action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
-        Resource: `arn:aws:s3:::${formData.bucketName || 'YOUR-BUCKET-NAME'}/*`
+        Resource: [
+          `arn:aws:s3:::${formData.bucketName || 'YOUR-BUCKET-NAME'}/*`,
+          ...additionalBuckets.map(bucket => `arn:aws:s3:::${bucket}/*`)
+        ]
       }
     ]
   };
@@ -40,11 +48,56 @@ const BucketConnectionModal = ({ isOpen, onClose, onSuccess }) => {
     setError('');
   };
 
+  const handleAddBucket = () => {
+    if (!tempBucketName.trim()) {
+      setError('❌ Bucket name is required');
+      return;
+    }
+    if (tempBucketName === formData.bucketName) {
+      setError('❌ This bucket is already added as primary');
+      return;
+    }
+    if (additionalBuckets.includes(tempBucketName)) {
+      setError('❌ This bucket is already in the list');
+      return;
+    }
+    setAdditionalBuckets([...additionalBuckets, tempBucketName]);
+    setTempBucketName('');
+    setError('');
+  };
+
+  const handleRemoveBucket = (bucketName) => {
+    setAdditionalBuckets(additionalBuckets.filter(b => b !== bucketName));
+  };
+
   const copyToClipboard = () => {
     navigator.clipboard.writeText(policyJson);
     setCopiedPolicy(true);
     toast.success('Policy copied to clipboard!');
     setTimeout(() => setCopiedPolicy(false), 2000);
+  };
+
+  const generateModifiedPolicy = () => {
+    // Show only the new buckets to add to existing policy
+    const existingBuckets = [formData.bucketName, ...additionalBuckets];
+    const modificationGuide = {
+      message: "📝 HOW TO MODIFY YOUR EXISTING IAM POLICY",
+      currentBuckets: [],
+      newBucketsToAdd: existingBuckets,
+      instructions: [
+        "1. Go to AWS Console → IAM → Users → Select your user",
+        "2. Click 'Permissions' tab",
+        "3. Click on your policy name",
+        "4. Click 'Edit policy'",
+        "5. In the 'Resource' arrays below, add the new bucket ARNs",
+        "6. Review and save"
+      ],
+      policyResources: {
+        ListBucketResources: existingBuckets.map(b => `arn:aws:s3:::${b}`),
+        ObjectResources: existingBuckets.map(b => `arn:aws:s3:::${b}/*`)
+      }
+    };
+    return modificationGuide;
   };
 
   const handleConnect = async () => {
@@ -189,6 +242,54 @@ const BucketConnectionModal = ({ isOpen, onClose, onSuccess }) => {
                 </p>
               </div>
 
+              {/* Additional Buckets Section */}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+                <div className="mb-4">
+                  <h3 className="font-bold text-gray-900 text-lg">🪣 Multiple Buckets (Optional)</h3>
+                  <p className="text-gray-600 text-sm mt-1">Add more buckets to the same IAM policy to access multiple buckets</p>
+                </div>
+                
+                {/* Add Bucket Input */}
+                <div className="flex gap-2 mb-4">
+                  <input
+                    type="text"
+                    value={tempBucketName}
+                    onChange={(e) => setTempBucketName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddBucket()}
+                    placeholder="my-second-bucket"
+                    className="flex-1 px-3 py-2 border-2 border-green-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-gray-900 text-sm"
+                  />
+                  <button
+                    onClick={handleAddBucket}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium text-sm transition-colors"
+                  >
+                    + Add
+                  </button>
+                </div>
+
+                {/* Additional Buckets List */}
+                {additionalBuckets.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-gray-700">Added buckets:</p>
+                    {additionalBuckets.map((bucket, idx) => (
+                      <div key={idx} className="flex items-center justify-between bg-white p-3 rounded border border-green-200">
+                        <span className="text-sm text-gray-900 font-mono">{bucket}</span>
+                        <button
+                          onClick={() => handleRemoveBucket(bucket)}
+                          className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded text-xs font-medium transition-colors"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {additionalBuckets.length === 0 && (
+                  <p className="text-xs text-gray-500 italic">No additional buckets added yet</p>
+                )}
+              </div>
+
               {/* Security Warning */}
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3">
                 <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
@@ -197,8 +298,8 @@ const BucketConnectionModal = ({ isOpen, onClose, onSuccess }) => {
                   <ul className="list-disc list-inside mt-2 space-y-1 text-xs">
                     <li>NEVER use AWS root account credentials</li>
                     <li>Always create a LIMITED IAM user</li>
-                    <li>Only grant the 4 permissions shown above</li>
-                    <li>Limit access to your specific bucket only</li>
+                    <li>Only grant the permissions shown above</li>
+                    <li>Access is limited to your specified buckets only</li>
                     <li>Your credentials will be encrypted with AES-256-GCM</li>
                   </ul>
                 </div>
@@ -207,6 +308,28 @@ const BucketConnectionModal = ({ isOpen, onClose, onSuccess }) => {
           ) : (
             // Step 2: Form
             <div className="space-y-5">
+              {/* Already Have a Connected Bucket? */}
+              <div className="bg-purple-50 border-l-4 border-purple-600 p-4 rounded">
+                <p className="text-purple-900 font-semibold">💡 Already have a bucket connected?</p>
+                <p className="text-purple-800 text-sm mt-2 mb-3">
+                  You don't need to create a new IAM policy or user! Simply edit your existing policy to add the new bucket ARNs.
+                </p>
+                <div className="bg-white rounded p-3 border border-purple-200 text-sm space-y-2">
+                  <p className="font-semibold text-purple-900">How to modify your existing policy:</p>
+                  <ol className="list-decimal list-inside text-purple-800 space-y-1 text-xs">
+                    <li>Go to <span className="bg-purple-100 px-1 font-mono">AWS Console → IAM → Users</span></li>
+                    <li>Select your IAM user</li>
+                    <li>Click <span className="bg-purple-100 px-1 font-mono">Permissions</span> tab</li>
+                    <li>Find your policy and click <span className="bg-purple-100 px-1 font-mono">Edit policy</span></li>
+                    <li>In the <span className="bg-purple-100 px-1 font-mono">Resource</span> arrays, add your new bucket ARNs</li>
+                    <li>Review and save</li>
+                  </ol>
+                  <p className="text-purple-700 mt-3 font-mono text-xs bg-gray-50 p-2 rounded border border-purple-200">
+                    <span className="font-bold">Add to ListBucket Resource:</span> <span className="block mt-1">arn:aws:s3:::your-new-bucket</span>
+                    <span className="font-bold block mt-2">Add to Objects Resource:</span> <span className="block mt-1">arn:aws:s3:::your-new-bucket/*</span>
+                  </p>
+                </div>
+              </div>
               {/* Bucket Name */}
               <div>
                 <label className="block text-sm font-semibold text-gray-900 mb-2">

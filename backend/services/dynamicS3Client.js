@@ -6,11 +6,14 @@ const { decryptCredentials } = require('./credentialEncryption');
  * Get S3 client for a specific user
  * Creates a dynamic S3 client using user's encrypted AWS credentials
  * @param {string} userId - User ID
+ * @param {string} bucketId - Bucket ID (optional - uses first connected if not provided)
  * @returns {object} S3 client or error
  */
-const getS3ClientForUser = async (userId) => {
+const getS3ClientForUser = async (userId, bucketId = null) => {
   try {
-    console.log(`🔍 getS3ClientForUser called for user: ${userId}`);
+    console.log(`\n🔍 getS3ClientForUser called`);
+    console.log(`   userId: ${userId}`);
+    console.log(`   bucketId param: ${bucketId}`);
     
     if (!userId) {
       console.log(`❌ User ID is required`);
@@ -21,8 +24,24 @@ const getS3ClientForUser = async (userId) => {
     }
 
     // Fetch user's cloud config
-    console.log(`📊 Fetching cloud config from database...`);
-    const cloudConfig = await UserCloudConfig.findOne({ userId, isConnected: true });
+    console.log(`📊 Fetching from UserCloudConfig...`);
+    let cloudConfig;
+
+    if (bucketId) {
+      // Use specific bucket
+      console.log(`   Query: { _id: ${bucketId}, userId: ${userId}, isConnected: true }`);
+      cloudConfig = await UserCloudConfig.findOne({ 
+        _id: bucketId,
+        userId, 
+        isConnected: true 
+      });
+      console.log(`   Result: ${cloudConfig ? cloudConfig.bucketName : 'NOT FOUND'}`);
+    } else {
+      // Use first connected bucket
+      console.log(`   Query: { userId: ${userId}, isConnected: true } (FIRST)`);
+      cloudConfig = await UserCloudConfig.findOne({ userId, isConnected: true });
+      console.log(`   Result: ${cloudConfig ? cloudConfig.bucketName : 'NOT FOUND'}`);
+    }
 
     if (!cloudConfig) {
       console.log(`❌ No AWS bucket connected for user: ${userId}`);
@@ -32,11 +51,7 @@ const getS3ClientForUser = async (userId) => {
       };
     }
 
-    console.log(`✅ Cloud config found:`, {
-      bucketName: cloudConfig.bucketName,
-      region: cloudConfig.region,
-      isConnected: cloudConfig.isConnected
-    });
+    console.log(`✅ Using bucket: ${cloudConfig.bucketName} (ID: ${cloudConfig._id})`);
 
     // Decrypt credentials
     console.log(`🔐 Decrypting AWS credentials...`);
@@ -65,7 +80,7 @@ const getS3ClientForUser = async (userId) => {
       signatureVersion: 'v4'
     });
 
-    console.log(`✅ S3 client created successfully`);
+    console.log(`✅ S3 client created successfully for bucket: ${cloudConfig.bucketName}`);
 
     return {
       success: true,
@@ -139,20 +154,28 @@ const isUserBucketConnected = async (userId) => {
 
 /**
  * Generate S3 key for user's bucket
+ * Supports direct file uploads while maintaining folder structure
  * @param {string} userId - User ID
  * @param {string} fileName - File name
  * @param {string} folderId - Folder ID (optional)
+ * @param {string} folderPath - Folder path/structure (optional, for preserving directory structure)
  * @returns {string} S3 key
  */
-const generateUserS3Key = (userId, fileName, folderId = null) => {
-  // Structure: userId/folders/folderId/fileName or userId/root/fileName
+const generateUserS3Key = (userId, fileName, folderId = null, folderPath = '') => {
   const timestamp = Date.now();
   const randomStr = Math.random().toString(36).substring(2, 8);
   const uniqueFileName = `${timestamp}-${randomStr}-${fileName}`;
 
+  // If folderPath provided (from directory upload), use it
+  if (folderPath && folderPath.trim()) {
+    return `${userId}/${folderPath}/${uniqueFileName}`;
+  }
+
+  // Otherwise use folder structure
   if (folderId && folderId !== 'root') {
     return `${userId}/folders/${folderId}/${uniqueFileName}`;
   }
+  
   return `${userId}/root/${uniqueFileName}`;
 };
 
@@ -162,14 +185,15 @@ const generateUserS3Key = (userId, fileName, folderId = null) => {
  * @param {Buffer} fileBuffer - File content
  * @param {string} s3Key - S3 key
  * @param {string} contentType - MIME type
+ * @param {string} bucketId - Bucket ID (optional - uses first connected if not provided)
  * @returns {object} Upload result
  */
-const uploadToUserS3 = async (userId, fileBuffer, s3Key, contentType = 'application/octet-stream') => {
+const uploadToUserS3 = async (userId, fileBuffer, s3Key, contentType = 'application/octet-stream', bucketId = null) => {
   try {
-    console.log(`☁️ uploadToUserS3 called for user: ${userId}, key: ${s3Key}`);
+    console.log(`☁️ uploadToUserS3 called for user: ${userId}, key: ${s3Key}, bucketId: ${bucketId}`);
     
-    // Get S3 client for user
-    const clientResult = await getS3ClientForUser(userId);
+    // Get S3 client for user (with optional bucket ID)
+    const clientResult = await getS3ClientForUser(userId, bucketId);
     if (!clientResult.success) {
       console.log(`❌ Failed to get S3 client: ${clientResult.error}`);
       return {
@@ -228,11 +252,12 @@ const uploadToUserS3 = async (userId, fileBuffer, s3Key, contentType = 'applicat
  * Download file from user's S3 bucket
  * @param {string} userId - User ID
  * @param {string} s3Key - S3 key
+ * @param {string} bucketId - Bucket ID (optional - uses first connected if not provided)
  * @returns {object} File buffer or error
  */
-const downloadFromUserS3 = async (userId, s3Key) => {
+const downloadFromUserS3 = async (userId, s3Key, bucketId = null) => {
   try {
-    console.log(`📥 downloadFromUserS3 called for user: ${userId}, key: ${s3Key}`);
+    console.log(`📥 downloadFromUserS3 called for user: ${userId}, key: ${s3Key}, bucketId: ${bucketId}`);
     
     // Validate inputs
     if (!userId || !s3Key) {
@@ -244,7 +269,7 @@ const downloadFromUserS3 = async (userId, s3Key) => {
     }
     
     // Get S3 client for user
-    const clientResult = await getS3ClientForUser(userId);
+    const clientResult = await getS3ClientForUser(userId, bucketId);
     if (!clientResult.success) {
       console.log(`❌ Failed to get S3 client: ${clientResult.error}`);
       return {
@@ -378,12 +403,13 @@ const downloadFromUserS3 = async (userId, s3Key) => {
  * Delete file from user's S3 bucket
  * @param {string} userId - User ID
  * @param {string} s3Key - S3 key
+ * @param {string} bucketId - Bucket ID (optional - uses first connected if not provided)
  * @returns {object} Delete result
  */
-const deleteFromUserS3 = async (userId, s3Key) => {
+const deleteFromUserS3 = async (userId, s3Key, bucketId = null) => {
   try {
-    // Get S3 client for user
-    const clientResult = await getS3ClientForUser(userId);
+    // Get S3 client for user (with optional bucket ID)
+    const clientResult = await getS3ClientForUser(userId, bucketId);
     if (!clientResult.success) {
       return {
         success: false,

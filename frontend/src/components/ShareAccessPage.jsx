@@ -132,11 +132,53 @@ const ShareAccessPage = () => {
         
         setPreviewType(shareDetails.file.type);
         setShowPreviewViewer(true);
-        toast.success('File preview loaded');
+        toast.success('File preview loaded successfully');
       }
     } catch (error) {
       console.error('Preview error:', error);
-      toast.error('Failed to preview file');
+      console.error('Error response:', error.response?.data);
+      
+      // Extract error details for better messaging
+      const errorData = error.response?.data;
+      const errorCode = errorData?.code || 'UNKNOWN';
+      const errorMessage = errorData?.message || 'Unable to preview file';
+      const errorDetails = errorData?.details;
+      
+      // Provide specific error messages based on error code
+      let userMessage = '❌ ' + errorMessage;
+      
+      if (error.response?.status === 401) {
+        userMessage = '❌ Invalid password. Please verify and try again.';
+      } else if (error.response?.status === 403) {
+        userMessage = '❌ ' + errorMessage;
+      } else if (error.response?.status === 410) {
+        userMessage = '❌ This share link has expired or the file has been deleted by the owner.';
+        setTimeout(() => navigate('/'), 3000);
+      } else if (error.response?.status === 429) {
+        userMessage = '❌ Too many failed attempts. Please try again later.';
+        setTimeout(() => navigate('/'), 3000);
+      } else if (error.code === 'ECONNABORTED') {
+        userMessage = '❌ Preview timeout. The file is taking too long to load. Please try again.';
+      } else if (error.response?.status >= 500) {
+        // Use specific error codes for server errors
+        if (errorCode === 'S3_FILE_NOT_FOUND') {
+          userMessage = '❌ File not found in storage. It may have been deleted.';
+        } else if (errorCode === 'S3_ACCESS_DENIED') {
+          userMessage = '❌ Access denied to file storage. Please contact the file owner.';
+        } else if (errorCode === 'S3_TIMEOUT') {
+          userMessage = '❌ Storage service timeout. Please try again later.';
+        } else if (errorCode === 'DECRYPTION_FAILED') {
+          userMessage = '❌ Failed to decrypt file. It may be corrupted or the encryption key is incorrect.';
+        } else if (errorCode === 'ENCRYPTION_PASSWORD_MISSING') {
+          userMessage = '❌ File encryption key is not available. Please contact the file owner.';
+        } else if (errorCode === 'FILE_DELETED') {
+          userMessage = '❌ ' + errorMessage;
+        } else {
+          userMessage = '❌ Server error: Unable to process preview request. Please try again later.';
+        }
+      }
+      
+      toast.error(userMessage);
     } finally {
       setPreviewing(false);
     }
@@ -144,14 +186,14 @@ const ShareAccessPage = () => {
 
   const handleDownload = async () => {
     if (!shareDetails?.settings.allowDownload) {
-      toast.error('Download is not allowed for this share');
+      toast.error('❌ Download is not allowed for this share');
       return;
     }
 
     setDownloading(true);
 
     try {
-      toast.loading('Decrypting and downloading file...', { id: 'download' });
+      toast.loading('⏳ Decrypting and downloading file...', { id: 'download' });
       
       const response = await fileAPI.downloadSharedFile(shareToken, {
         password,
@@ -182,22 +224,53 @@ const ShareAccessPage = () => {
         link.click();
         document.body.removeChild(link);
         
-        toast.success('File downloaded successfully', { id: 'download' });
+        toast.success('✅ File downloaded successfully', { id: 'download' });
 
         // Clean up
         setTimeout(() => window.URL.revokeObjectURL(url), 1000);
       }
     } catch (error) {
       console.error('Download error:', error);
+      console.error('Error response:', error.response?.data);
+      
+      // Extract error details for better messaging
+      const errorData = error.response?.data;
+      const errorCode = errorData?.code || 'UNKNOWN';
+      const errorMessage = errorData?.message || 'Unable to download file';
+      
+      // Provide specific error messages based on error code
+      let userMessage = '❌ ' + errorMessage;
+      
       if (error.response?.status === 401) {
-        toast.error('Invalid password. Please try again.', { id: 'download' });
+        userMessage = '❌ Invalid password. Please verify and try again.';
+      } else if (error.response?.status === 403) {
+        userMessage = '❌ ' + errorMessage;
       } else if (error.response?.status === 410) {
-        toast.error('Share link has expired or download limit reached.', { id: 'download' });
+        userMessage = '❌ Share link has expired or download limit reached. File is no longer available.';
+      } else if (error.response?.status === 429) {
+        userMessage = '❌ Too many failed attempts. Please try again later.';
       } else if (error.code === 'ECONNABORTED') {
-        toast.error('Download timeout. Please try again.', { id: 'download' });
-      } else {
-        toast.error('Failed to download file', { id: 'download' });
+        userMessage = '❌ Download timeout. The file is taking too long to download. Please try again.';
+      } else if (error.response?.status >= 500) {
+        // Use specific error codes for server errors
+        if (errorCode === 'S3_FILE_NOT_FOUND') {
+          userMessage = '❌ File not found in storage. It may have been deleted.';
+        } else if (errorCode === 'S3_ACCESS_DENIED') {
+          userMessage = '❌ Access denied to file storage. Please contact the file owner.';
+        } else if (errorCode === 'S3_TIMEOUT') {
+          userMessage = '❌ Storage service timeout. Please try again later.';
+        } else if (errorCode === 'DECRYPTION_FAILED') {
+          userMessage = '❌ Failed to decrypt file. It may be corrupted or the encryption key is incorrect.';
+        } else if (errorCode === 'ENCRYPTION_PASSWORD_MISSING') {
+          userMessage = '❌ File encryption key is not available. Please contact the file owner.';
+        } else if (errorCode === 'FILE_DELETED') {
+          userMessage = '❌ ' + errorMessage;
+        } else {
+          userMessage = '❌ Server error: Unable to process download request. Please try again later.';
+        }
       }
+      
+      toast.error(userMessage, { id: 'download' });
     } finally {
       setDownloading(false);
     }

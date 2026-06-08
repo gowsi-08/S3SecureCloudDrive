@@ -47,7 +47,17 @@ const sharedFileSchema = new mongoose.Schema({
   },
   isActive: {
     type: Boolean,
-    default: true
+    default: true,
+    index: true
+  },
+  deactivationReason: {
+    type: String,
+    enum: ['user_disabled', 'original_file_deleted', 'original_folder_deleted', 'share_expired', 'owner_deactivated'],
+    default: null
+  },
+  deactivatedAt: {
+    type: Date,
+    default: null
   },
   accessLog: [
     {

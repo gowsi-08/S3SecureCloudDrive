@@ -6,8 +6,18 @@ const createFolder = async (req, res) => {
   try {
     const { folderName, parentFolderId } = req.body;
     const userId = req.user._id;
+    const bucketId = req.bucketId;  // Get bucketId from middleware (required for bucket isolation)
 
-    console.log('📁 Create folder request:', { folderName, parentFolderId, userId });
+    console.log('📁 Create folder request:', { folderName, parentFolderId, userId, bucketId });
+
+    // CRITICAL: Ensure bucketId is present
+    if (!bucketId) {
+      console.log('🔴 CRITICAL ERROR: bucketId is missing!');
+      return res.status(400).json({
+        success: false,
+        message: 'Bucket ID is required - middleware failed to set bucketId'
+      });
+    }
 
     if (!folderName || !folderName.trim()) {
       console.log('❌ Folder name is required');
@@ -24,11 +34,12 @@ const createFolder = async (req, res) => {
       parentFolder = await Folder.findOne({
         _id: parentFolderId,
         userId,
+        bucketId,  // Validate it's in the same bucket
         isDeleted: false
       });
 
       if (!parentFolder) {
-        console.log('❌ Parent folder not found');
+        console.log('❌ Parent folder not found or in different bucket');
         return res.status(404).json({
           success: false,
           message: 'Parent folder not found'
@@ -38,16 +49,17 @@ const createFolder = async (req, res) => {
     }
 
     // Check for duplicate folder name
-    console.log('🔍 Checking for duplicate folder name');
+    console.log('🔍 Checking for duplicate folder name in this bucket');
     const existingFolder = await Folder.findOne({
       userId,
+      bucketId,  // Check only in this bucket
       folderName: folderName.trim(),
       parentFolderId: parentFolderId || null,
       isDeleted: false
     });
 
     if (existingFolder) {
-      console.log('❌ Folder with this name already exists');
+      console.log('❌ Folder with this name already exists in this bucket');
       return res.status(409).json({
         success: false,
         message: 'Folder with this name already exists'
@@ -68,10 +80,11 @@ const createFolder = async (req, res) => {
       console.log('📍 Path (root):', path, 'Level:', level);
     }
 
-    // Create folder with path and level already set
+    // Create folder with path, level, and bucketId
     console.log('📝 Creating new folder document');
     const folder = new Folder({
       userId,
+      bucketId,  // Store bucketId for isolation
       folderName: folderName.trim(),
       parentFolderId: parentFolderId || null,
       path: path,
@@ -85,7 +98,8 @@ const createFolder = async (req, res) => {
       id: folder._id,
       name: folder.folderName,
       path: folder.path,
-      level: folder.level
+      level: folder.level,
+      bucketId: folder.bucketId
     });
 
     res.status(201).json({
@@ -97,6 +111,7 @@ const createFolder = async (req, res) => {
         parentFolderId: folder.parentFolderId,
         path: folder.path,
         level: folder.level,
+        bucketId: folder.bucketId,
         createdAt: folder.createdAt
       }
     });
@@ -117,6 +132,15 @@ const getFolderContents = async (req, res) => {
   try {
     const { folderId } = req.params;
     const userId = req.user._id;
+    const bucketId = req.bucketId;  // Use bucketId from middleware (REQUIRED)
+
+    console.log(`\n📂 getFolderContents controller called:`);
+    console.log(`   folderId: ${folderId}`);
+    console.log(`   userId: ${userId}`);
+    console.log(`   req.bucketId from middleware: ${req.bucketId}`);
+    console.log(`   req.query.bucketId: ${req.query.bucketId}`);
+    console.log(`   bucketId type: ${typeof bucketId}`);
+    console.log(`   Full query: ${JSON.stringify(req.query)}`);
 
     // Validate folder if provided
     if (folderId && folderId !== 'root') {
@@ -134,9 +158,9 @@ const getFolderContents = async (req, res) => {
       }
     }
 
-    // Get folder contents
+    // Get folder contents with bucket isolation
     const targetFolderId = (folderId === 'root') ? null : folderId;
-    const { folders, files } = await Folder.getFolderContents(userId, targetFolderId);
+    const { folders, files } = await Folder.getFolderContents(userId, targetFolderId, bucketId);
 
     // Format folders
     const formattedFolders = folders.map(folder => ({
@@ -202,18 +226,29 @@ const deleteFolder = async (req, res) => {
   try {
     const { folderId } = req.params;
     const userId = req.user._id;
+    const bucketId = req.bucketId;  // Get bucketId from middleware
 
-    console.log('🗑️ Delete folder request:', { folderId, userId });
+    console.log('🗑️ Delete folder request:', { folderId, userId, bucketId });
 
-    // Find folder
+    // CRITICAL: Ensure bucketId is present
+    if (!bucketId) {
+      console.log('🔴 CRITICAL ERROR: bucketId is missing!');
+      return res.status(400).json({
+        success: false,
+        message: 'Bucket ID is required - middleware failed to set bucketId'
+      });
+    }
+
+    // Find folder - MUST verify it's in the same bucket
     const folder = await Folder.findOne({
       _id: folderId,
       userId,
+      bucketId,  // Verify it's in this bucket
       isDeleted: false
     });
 
     if (!folder) {
-      console.log('❌ Folder not found');
+      console.log('❌ Folder not found or in different bucket');
       return res.status(404).json({
         success: false,
         message: 'Folder not found'
@@ -225,17 +260,20 @@ const deleteFolder = async (req, res) => {
     // Find all files in this folder and subfolders
     console.log('🔍 Finding all files in folder and subfolders...');
     const { deleteFromUserS3 } = require('../services/dynamicS3Client');
+    const shareCleanupService = require('../services/shareCleanupService');
     
     // Get all files in this folder (recursively)
     const getAllFilesInFolder = async (parentFolderId) => {
       const files = await File.find({
         userId,
+        bucketId,  // Only files in this bucket
         folderId: parentFolderId,
         isDeleted: false
       });
       
       const subfolders = await Folder.find({
         userId,
+        bucketId,  // Only subfolders in this bucket
         parentFolderId: parentFolderId,
         isDeleted: false
       });
@@ -252,11 +290,16 @@ const deleteFolder = async (req, res) => {
     const filesToDelete = await getAllFilesInFolder(folderId);
     console.log(`📄 Found ${filesToDelete.length} files to delete`);
 
-    // Delete files from S3
+    // STEP 1-7: Use share cleanup service to HARD DELETE all share links for files in this folder
+    const fileIdsToDelete = filesToDelete.map(f => f._id);
+    const cleanupResult = await shareCleanupService.cleanupShareLinksForFiles(fileIdsToDelete, 'original_folder_deleted');
+    console.log(`📊 Share cleanup result - Hard deleted: ${cleanupResult.deletedCount} share link(s)`);
+
+    // STEP 8: Delete files from S3
     for (const file of filesToDelete) {
       try {
         console.log(`🗑️ Deleting from S3: ${file.s3Key}`);
-        const deleteResult = await deleteFromUserS3(userId, file.s3Key);
+        const deleteResult = await deleteFromUserS3(userId, file.s3Key, bucketId);
         if (deleteResult.success) {
           console.log(`✅ Deleted from S3: ${file.s3Key}`);
         } else {
@@ -267,8 +310,8 @@ const deleteFolder = async (req, res) => {
       }
     }
 
-    // Mark all files as deleted in database
-    console.log('💾 Marking files as deleted in database...');
+    // STEP 9: Mark all files as deleted in database
+    console.log('💾 Marking files as deleted...');
     await File.updateMany(
       { _id: { $in: filesToDelete.map(f => f._id) } },
       { isDeleted: true, deletedAt: new Date() }
@@ -279,6 +322,7 @@ const deleteFolder = async (req, res) => {
     const markSubfoldersDeleted = async (parentFolderId) => {
       const subfolders = await Folder.find({
         userId,
+        bucketId,
         parentFolderId: parentFolderId,
         isDeleted: false
       });
@@ -288,7 +332,7 @@ const deleteFolder = async (req, res) => {
       }
       
       await Folder.updateMany(
-        { parentFolderId: parentFolderId, userId, isDeleted: false },
+        { parentFolderId: parentFolderId, userId, bucketId, isDeleted: false },
         { isDeleted: true, deletedAt: new Date() }
       );
     };
@@ -304,7 +348,9 @@ const deleteFolder = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Folder deleted successfully'
+      message: `Folder deleted successfully. ${cleanupResult.deletedCount} share link(s) have been permanently removed.`,
+      filesDeleted: filesToDelete.length,
+      shareLinksRemoved: cleanupResult.deletedCount
     });
 
   } catch (error) {
@@ -320,14 +366,29 @@ const deleteFolder = async (req, res) => {
 const getStorageStats = async (req, res) => {
   try {
     const userId = req.user._id;
+    const bucketId = req.bucketId;  // Use bucketId from middleware (REQUIRED)
 
-    // Get file statistics
+    console.log(`📊 Storage stats: userId=${userId}, bucketId=${bucketId}`);
+    
+    // CRITICAL: Ensure bucketId is present
+    if (!bucketId) {
+      console.log(`   🔴 CRITICAL ERROR: bucketId is missing in getStorageStats!`);
+      return res.status(400).json({
+        success: false,
+        message: 'Bucket ID is required for storage statistics'
+      });
+    }
+
+    // Get file statistics - FILTERED by bucket
+    const fileQuery = {
+      userId,
+      bucketId,  // Mandatory bucket filtering
+      isDeleted: false
+    };
+    
     const fileStats = await File.aggregate([
       {
-        $match: {
-          userId: userId,
-          isDeleted: false
-        }
+        $match: fileQuery
       },
       {
         $group: {
@@ -338,7 +399,7 @@ const getStorageStats = async (req, res) => {
       }
     ]);
 
-    // Get folder count
+    // Get folder count (not filtered by bucket - user-level)
     const folderCount = await Folder.countDocuments({
       userId,
       isDeleted: false
@@ -353,7 +414,8 @@ const getStorageStats = async (req, res) => {
           totalFiles: stats.totalFiles,
           totalFolders: folderCount,
           totalSize: stats.totalSize,
-          formattedTotalSize: formatFileSize(stats.totalSize)
+          formattedTotalSize: formatFileSize(stats.totalSize),
+          bucketId: bucketId
         }
       }
     });

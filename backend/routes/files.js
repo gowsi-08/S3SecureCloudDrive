@@ -22,24 +22,16 @@ router.use(protect);
 router.use(requireBucketConnection);
 
 // File upload routes
-// Note: handleUploadError must be placed AFTER the upload middleware to catch multer errors
-router.post('/upload', (req, res, next) => {
-  console.log('📨 Upload route handler called');
-  console.log('Headers:', req.headers);
-  console.log('Content-Type:', req.get('content-type'));
-  
-  upload.array('files', 10)(req, res, (err) => {
-    console.log('📨 After multer middleware');
-    console.log('req.files:', req.files ? `${req.files.length} files` : 'undefined');
-    console.log('Error:', err);
-    
-    if (err) {
-      console.log('🔍 Multer error caught in route handler:', err);
-      return handleUploadError(err, req, res, next);
-    }
-    next();
-  });
-}, uploadFiles);
+// Custom error handling middleware for multer
+const multerErrorHandler = (err, req, res, next) => {
+  if (err) {
+    console.log('🔍 Multer error caught:', err);
+    return handleUploadError(err, req, res, next);
+  }
+  next();
+};
+
+router.post('/upload', upload.array('files', 10), multerErrorHandler, uploadFiles);
 
 // File management routes
 router.get('/', getFiles);

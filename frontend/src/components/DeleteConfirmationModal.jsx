@@ -135,10 +135,36 @@ const DeleteConfirmationModal = ({
           )}
 
           {/* Warning Message */}
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-sm text-red-800">
-              <strong>⚠️ Warning:</strong> Deleting this {itemType.toLowerCase()} will permanently remove it from your storage. This action cannot be reversed.
-            </p>
+          <div className="mb-6 space-y-3">
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-800">
+                <strong>⚠️ Warning:</strong> Deleting this {itemType.toLowerCase()} will permanently remove it from your storage. This action cannot be reversed.
+              </p>
+            </div>
+
+            {/* Share Link Warning for Files */}
+            {isFile && (
+              <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
+                <p className="text-sm text-orange-800 font-medium mb-2">
+                  🔗 Share Links Will Be Revoked
+                </p>
+                <p className="text-sm text-orange-700">
+                  If you've shared this file with others, all active share links will be permanently deactivated and removed. Shared users will no longer be able to access this file.
+                </p>
+              </div>
+            )}
+
+            {/* Share Link Warning for Folders */}
+            {!isFile && (
+              <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
+                <p className="text-sm text-orange-800 font-medium mb-2">
+                  🔗 Share Links Will Be Revoked
+                </p>
+                <p className="text-sm text-orange-700">
+                  All files in this folder and any shared links associated with them will be permanently deactivated. Shared users will no longer be able to access any files from this folder.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Confirmation Input */}

@@ -3,6 +3,7 @@ const Folder = require('../models/Folder');
 const { deleteFromS3, deleteMultipleFromS3, listS3Objects } = require('../utils/s3');
 const { clearPasswordFromMemory } = require('../utils/encryption');
 const mongoose = require('mongoose');
+const shareCleanupService = require('../services/shareCleanupService');
 
 /**
  * Securely delete a file with ownership verification and name confirmation
@@ -60,6 +61,11 @@ const deleteFileSecure = async (req, res) => {
 
     console.log('File ownership and name verification passed');
 
+    // STEP 1-7: HARD DELETE all share links for this file before permanent deletion
+    console.log('🗑️ HARD deleting all share links for secure deletion...');
+    const cleanupResult = await shareCleanupService.cleanupShareLinksForFile(fileId, 'secure_delete_by_owner');
+    console.log('Share hard delete result:', cleanupResult);
+
     // Prepare file info for response
     const fileInfo = {
       id: file._id,
@@ -71,19 +77,19 @@ const deleteFileSecure = async (req, res) => {
       folderId: file.folderId
     };
 
-    // Delete from S3 first (critical for security)
-    console.log('Deleting file from S3:', file.s3Key);
+    // STEP 8: Delete from S3 first (critical for security)
+    console.log('☁️ Deleting file from S3:', file.s3Key);
     const s3DeleteResult = await deleteFromS3(file.s3Key);
     
     if (!s3DeleteResult.success) {
       console.error('S3 deletion failed:', s3DeleteResult.error);
-      // Log but continue - file might already be deleted from S3
       console.log('Continuing with database deletion despite S3 error');
     } else {
-      console.log('File successfully deleted from S3');
+      console.log('✅ File successfully deleted from S3');
     }
 
-    // Permanent deletion from database
+    // STEP 9: Permanent deletion from database
+    console.log('💾 Permanently deleting file from database...');
     const deleteResult = await File.deleteOne({ _id: fileId, userId });
     
     if (deleteResult.deletedCount === 0) {
@@ -93,7 +99,7 @@ const deleteFileSecure = async (req, res) => {
       });
     }
 
-    console.log('File permanently deleted from database');
+    console.log('✅ File permanently deleted from database');
 
     // Clear any cached encryption keys for this file
     try {
@@ -104,9 +110,10 @@ const deleteFileSecure = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'File permanently deleted successfully',
+      message: 'File permanently deleted successfully. All share links have been permanently removed.',
       data: {
         deletedFile: fileInfo,
+        shareLinksRemoved: cleanupResult.deletedCount,
         deletionTimestamp: new Date(),
         s3Deleted: s3DeleteResult.success,
         s3Error: s3DeleteResult.success ? null : s3DeleteResult.error
@@ -193,6 +200,12 @@ const deleteFolderSecure = async (req, res) => {
 
     console.log('Found files to delete:', filesToDelete.length);
 
+    // CRITICAL: Clean up all share links for all files in this folder before permanent deletion
+    console.log('Cleaning up share links for secure folder deletion...');
+    const fileIdsToDelete = filesToDelete.map(f => f._id);
+    const cleanupResult = await shareCleanupService.cleanupShareLinksForFiles(fileIdsToDelete, 'secure_folder_delete_by_owner');
+    console.log('Share cleanup result:', cleanupResult);
+
     // Prepare deletion summary
     const deletionSummary = {
       folder: {
@@ -259,9 +272,10 @@ const deleteFolderSecure = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Folder and all contents permanently deleted successfully',
+      message: 'Folder and all contents permanently deleted successfully. All share links have been revoked.',
       data: {
         deletionSummary,
+        shareLinksRevoked: cleanupResult.deactivatedCount,
         results: {
           filesDeleted: fileDeleteResult.deletedCount,
           foldersDeleted: folderDeleteResult.deletedCount,

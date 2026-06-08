@@ -19,16 +19,7 @@ const fileSchema = new mongoose.Schema({
   },
   fileType: {
     type: String,
-    required: true,
-    enum: [
-      'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-      'application/pdf',
-      'text/plain', 'text/csv',
-      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'video/mp4', 'video/avi', 'video/mov', 'video/wmv',
-      'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/m4a'
-    ]
+    required: true
   },
   fileSize: {
     type: Number,
@@ -43,6 +34,12 @@ const fileSchema = new mongoose.Schema({
   folderId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Folder',
+    default: null,
+    index: true
+  },
+  bucketId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'UserCloudConfig',
     default: null,
     index: true
   },
@@ -102,9 +99,13 @@ const fileSchema = new mongoose.Schema({
 
 // Indexes for better query performance
 fileSchema.index({ userId: 1, folderId: 1 });
+fileSchema.index({ userId: 1, bucketId: 1 });
 fileSchema.index({ userId: 1, fileName: 1 });
 fileSchema.index({ userId: 1, fileType: 1 });
 fileSchema.index({ userId: 1, uploadedAt: -1 });
+// Compound indexes for common queries
+fileSchema.index({ userId: 1, bucketId: 1, folderId: 1 });
+fileSchema.index({ userId: 1, bucketId: 1, isDeleted: 1 });
 
 // Virtual for file category
 fileSchema.virtual('category').get(function() {

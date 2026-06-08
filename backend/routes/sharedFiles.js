@@ -9,7 +9,9 @@ const {
   downloadSharedFile,
   getMyShares,
   deactivateShare,
-  deleteShare
+  deleteShare,
+  auditShares,
+  cleanupOrphanedShares
 } = require('../controllers/sharedFileController');
 
 const { protect } = require('../middleware/auth');
@@ -27,5 +29,9 @@ router.post('/generate', protect, requireBucketConnection, generateShareLink);
 router.get('/my-shares', protect, getMyShares);
 router.put('/:shareId/deactivate', protect, deactivateShare);
 router.delete('/:shareId', protect, deleteShare);
+
+// Audit and cleanup routes
+router.get('/audit/orphaned', protect, auditShares);
+router.post('/cleanup/orphaned', protect, cleanupOrphanedShares);
 
 module.exports = router;

@@ -13,6 +13,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Plus,
   FolderPlus,
   UploadCloud,
@@ -54,6 +55,9 @@ const Dashboard = () => {
   const [createBucketModalOpen, setCreateBucketModalOpen] = useState(false);
   const [bucketConnected, setBucketConnected] = useState(false);
   const [checkingBucket, setCheckingBucket] = useState(true);
+  const [connectedBuckets, setConnectedBuckets] = useState([]);
+  const [selectedBucketId, setSelectedBucketId] = useState(null);
+  const [showBucketDropdown, setShowBucketDropdown] = useState(false);
 
   // Modal states
   const [encryptionModalOpen, setEncryptionModalOpen] = useState(false);
@@ -88,14 +92,19 @@ const Dashboard = () => {
       const response = await cloudConfigAPI.getConnectionStatus();
       if (response.data.success) {
         const isConnected = response.data.data.isConnected;
+        const buckets = response.data.data.buckets || [];
+        
         setBucketConnected(isConnected);
-        if (!isConnected) {
+        setConnectedBuckets(buckets);
+        
+        if (buckets.length > 0) {
+          setSelectedBucketId(buckets[0].id);
+        } else if (!isConnected) {
           setBucketConnectionModalOpen(true);
         }
       }
     } catch (error) {
       console.error('Check bucket connection error:', error);
-      // If error, show modal to connect
       setBucketConnectionModalOpen(true);
     } finally {
       setCheckingBucket(false);
@@ -106,32 +115,72 @@ const Dashboard = () => {
     setBucketConnected(true);
     setBucketConnectionModalOpen(false);
     toast.success('Bucket connected successfully!');
-    loadFolderContents();
-    loadStats();
+    checkBucketConnection();
+    // Don't call loadFolderContents here - let the useEffect handle it when selectedBucketId updates
   };
 
-  // Load folder contents
-  const loadFolderContents = async (folderId = 'root') => {
+  // Disconnect bucket
+  const handleDisconnectBucket = async (bucketId, bucketName) => {
+    if (!window.confirm(`Are you sure you want to disconnect "${bucketName}"?`)) {
+      return;
+    }
+    
     try {
+      await cloudConfigAPI.disconnectBucket(bucketId);
+      toast.success(`"${bucketName}" disconnected successfully`);
+      checkBucketConnection();
+      loadFolderContents();
+      loadStats();
+    } catch (error) {
+      console.error('Disconnect bucket error:', error);
+      toast.error('Failed to disconnect bucket');
+    }
+  };
+
+  // Load folder contents - with explicit bucketId to prevent race conditions
+  const loadFolderContents = async (folderId = 'root', bucketId = selectedBucketId) => {
+    try {
+      console.log(`📂 loadFolderContents called: folderId=${folderId}, bucketId=${bucketId}`);
+      
+      // If no bucketId, skip loading
+      if (!bucketId) {
+        console.log(`⚠️ No bucketId available, skipping folder load`);
+        setLoading(false);
+        return;
+      }
+      
       setLoading(true);
-      const response = await folderAPI.getFolderContents(folderId);
+      const response = await folderAPI.getFolderContents(folderId, bucketId);
+      
       if (response.data.success) {
+        console.log(`✅ Loaded ${response.data.data.files.length} files from bucket`);
         setCurrentFolder(response.data.data.currentFolder);
         setFolders(response.data.data.folders);
         setFiles(response.data.data.files);
       }
     } catch (error) {
-      toast.error('Failed to load folder contents');
       console.error('Load folder error:', error);
+      // Only show error if bucketId was provided (actual error)
+      if (selectedBucketId) {
+        toast.error(error.response?.data?.details || error.response?.data?.message || 'Failed to load folder contents');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Load storage stats
-  const loadStats = async () => {
+  // Load storage stats - with explicit bucketId to prevent race conditions
+  const loadStats = async (bucketId = selectedBucketId) => {
     try {
-      const response = await folderAPI.getStorageStats();
+      console.log(`📊 loadStats called with bucketId=${bucketId}`);
+      
+      // If no bucketId, skip loading stats
+      if (!bucketId) {
+        console.log(`⚠️ No bucketId available, skipping stats load`);
+        return;
+      }
+      
+      const response = await folderAPI.getStorageStats(bucketId);
       if (response.data.success) {
         const data = response.data.data.storage;
         setStats({
@@ -142,6 +191,7 @@ const Dashboard = () => {
       }
     } catch (error) {
       console.error('Load stats error:', error);
+      // Don't show error for stats - it's not critical
     }
   };
 
@@ -155,12 +205,12 @@ const Dashboard = () => {
     try {
       setCreateFolderLoading(true);
       
-      const response = await folderAPI.createFolder(folderName, parentFolderId);
+      const response = await folderAPI.createFolder(folderName, parentFolderId, selectedBucketId);
       
       if (response.data.success) {
         toast.success('Folder created successfully');
-        await loadFolderContents(currentFolder?.id || 'root');
-        await loadStats();
+        await loadFolderContents(currentFolder?.id || 'root', selectedBucketId);
+        await loadStats(selectedBucketId);
       }
     } catch (error) {
       console.error('Create folder error:', error);
@@ -171,12 +221,13 @@ const Dashboard = () => {
     }
   };
 
-  // Handle file upload
+  // Handle file upload (individual files only)
   const handleFileUpload = () => {
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
-    input.accept = 'image/*,application/pdf,text/*,.doc,.docx,.xls,.xlsx,video/*,audio/*';
+    // Allow ALL file types - no restrictions
+    input.accept = '*/*';
     
     input.onchange = (e) => {
       const files = Array.from(e.target.files);
@@ -186,9 +237,47 @@ const Dashboard = () => {
         file,
         name: file.name,
         size: (file.size / (1024 * 1024)).toFixed(2) + ' MB',
-        type: file.type
+        type: file.type,
+        webkitRelativePath: file.webkitRelativePath || file.name
       }));
 
+      setSelectedFiles(fileArray);
+      setEncryptionModalOpen(true);
+    };
+    
+    input.click();
+  };
+
+  // Handle folder upload (with structure preservation)
+  const handleFolderUpload = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.webkitdirectory = true;
+    input.mozdirectory = true;
+    
+    input.onchange = (e) => {
+      const files = Array.from(e.target.files);
+      if (files.length === 0) {
+        toast.error('No folder selected');
+        return;
+      }
+
+      const fileArray = files.map(file => ({
+        file,
+        name: file.name,
+        size: (file.size / (1024 * 1024)).toFixed(2) + ' MB',
+        type: file.type,
+        webkitRelativePath: file.webkitRelativePath || file.name
+      }));
+
+      // Extract folder name from first file path
+      const firstPath = fileArray[0].webkitRelativePath;
+      const folderName = firstPath ? firstPath.split('/')[0] : 'Folder';
+      
+      console.log(`📁 Folder upload: ${folderName} with ${fileArray.length} files`);
+      toast.success(`Selected folder: ${folderName} (${fileArray.length} files)`);
+      
       setSelectedFiles(fileArray);
       setEncryptionModalOpen(true);
     };
@@ -203,15 +292,23 @@ const Dashboard = () => {
 
       // Prepare form data
       const formData = new FormData();
-      files.forEach(fileObj => formData.append('files', fileObj.file));
+      files.forEach(fileObj => {
+        formData.append('files', fileObj.file);
+        // Include folder path if available (from folder upload)
+        if (fileObj.webkitRelativePath && fileObj.webkitRelativePath !== fileObj.name) {
+          const folderPath = fileObj.webkitRelativePath.substring(0, fileObj.webkitRelativePath.lastIndexOf('/'));
+          formData.append('folderPaths', folderPath);
+        }
+      });
       formData.append('folderId', currentFolder?.id || '');
       formData.append('password', password);
       formData.append('isCustomPassword', isCustomPassword ? 'true' : 'false');
+      formData.append('bucketId', selectedBucketId || '');  // Add bucketId
 
       toast.loading('Encrypting and uploading files...', { id: 'upload' });
 
-      // Upload files with encryption
-      const response = await fileAPI.uploadFiles(formData);
+      // Upload files with encryption - pass selectedBucketId
+      const response = await fileAPI.uploadFiles(formData, selectedBucketId);
       
       if (response.data.success) {
         const uploadedFiles = response.data.data.uploadedFiles || [];
@@ -229,8 +326,8 @@ const Dashboard = () => {
         }
         
         if (uploadedCount > 0) {
-          await loadFolderContents(currentFolder?.id || 'root');
-          await loadStats();
+          await loadFolderContents(currentFolder?.id || 'root', selectedBucketId);
+          await loadStats(selectedBucketId);
         }
       }
 
@@ -371,7 +468,10 @@ const Dashboard = () => {
 
   // Handle file share
   const handleShareFile = (file) => {
-    setSelectedFileForShare(file);
+    setSelectedFileForShare({
+      ...file,
+      bucketId: selectedBucketId
+    });
     setShareFileModalOpen(true);
   };
 
@@ -391,17 +491,25 @@ const Dashboard = () => {
       setDeleteLoading(true);
       
       if (itemToDelete.type === 'file') {
-        await fileAPI.deleteFile(itemToDelete.id);
-        toast.success('File deleted successfully');
+        const response = await fileAPI.deleteFile(itemToDelete.id, selectedBucketId);
+        const shareLinksRevoked = response.data?.data?.shareLinksRevoked || response.data?.shareLinksDeactivated || 0;
+        const message = shareLinksRevoked > 0 
+          ? `File deleted successfully. ${shareLinksRevoked} share link(s) have been revoked.`
+          : 'File deleted successfully';
+        toast.success(message);
       } else {
-        await folderAPI.deleteFolder(itemToDelete.id);
-        toast.success('Folder deleted successfully');
+        const response = await folderAPI.deleteFolder(itemToDelete.id);
+        const shareLinksRevoked = response.data?.shareLinksDeactivated || 0;
+        const message = shareLinksRevoked > 0
+          ? `Folder deleted successfully. ${shareLinksRevoked} share link(s) have been revoked.`
+          : 'Folder deleted successfully';
+        toast.success(message);
       }
       
       setDeleteConfirmationOpen(false);
       setItemToDelete(null);
-      await loadFolderContents(currentFolder?.id || 'root');
-      await loadStats();
+      await loadFolderContents(currentFolder?.id || 'root', selectedBucketId);
+      await loadStats(selectedBucketId);
     } catch (error) {
       console.error('Delete error:', error);
       toast.error('Failed to delete item');
@@ -422,9 +530,16 @@ const Dashboard = () => {
   // Load initial data
   useEffect(() => {
     checkBucketConnection();
-    loadFolderContents();
-    loadStats();
   }, []);
+
+  // Reload files when bucket selection changes
+  useEffect(() => {
+    if (selectedBucketId) {
+      console.log(`🔄 Bucket changed, reloading with bucketId: ${selectedBucketId}`);
+      loadFolderContents();
+      loadStats();
+    }
+  }, [selectedBucketId]);
 
   const sidebarWidth = sidebarCollapsed ? 'w-16' : 'w-64';
   const mainMargin = sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64';
@@ -472,7 +587,7 @@ const Dashboard = () => {
         <nav className="mt-4 px-2">
           <div className="space-y-1">
             <button 
-              onClick={() => loadFolderContents('root')}
+              onClick={() => loadFolderContents('root', selectedBucketId)}
               className="bg-blue-50 text-blue-700 group flex items-center w-full px-3 py-2 text-sm font-medium rounded-md hover:bg-blue-100 transition-colors"
             >
               <Cloud className="text-blue-500 h-5 w-5 flex-shrink-0" />
@@ -482,13 +597,72 @@ const Dashboard = () => {
             {/* Divider */}
             <div className="my-2 border-t border-gray-200" />
             
-            <button 
-              onClick={() => setCreateBucketModalOpen(true)}
-              className="text-gray-700 hover:bg-purple-50 hover:text-purple-900 group flex items-center w-full px-3 py-2 text-sm font-medium rounded-md transition-colors"
-            >
-              <HardDrive className="text-gray-400 group-hover:text-purple-500 h-5 w-5 flex-shrink-0" />
-              {!sidebarCollapsed && <span className="ml-3">Connect Bucket</span>}
-            </button>
+            {/* Bucket Selector */}
+            {bucketConnected && connectedBuckets.length > 0 && (
+              <div className="px-1 py-2 space-y-2">
+                {!sidebarCollapsed && (
+                  <p className="text-xs font-semibold text-gray-500 uppercase px-2">Buckets</p>
+                )}
+                {connectedBuckets.map(bucket => (
+                  <div
+                    key={bucket.id}
+                    className={`w-full px-3 py-2 text-sm rounded-md transition-colors flex items-center justify-between group ${
+                      selectedBucketId === bucket.id
+                        ? 'bg-purple-100 text-purple-700'
+                        : 'text-gray-700 hover:bg-gray-100'
+                    }`}
+                  >
+                    <button
+                      onClick={() => {
+                        setSelectedBucketId(bucket.id);
+                        loadFolderContents('root', bucket.id);
+                        loadStats(bucket.id);
+                      }}
+                      title={bucket.bucketName}
+                      className="flex-1 text-left"
+                    >
+                      <span className={!sidebarCollapsed ? 'truncate' : 'hidden'}>
+                        {bucket.bucketName}
+                      </span>
+                      <div className="flex-shrink-0">
+                        <div className={`w-2 h-2 rounded-full ${
+                          selectedBucketId === bucket.id ? 'bg-purple-600' : 'bg-gray-300'
+                        }`} />
+                      </div>
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDisconnectBucket(bucket.id, bucket.bucketName);
+                      }}
+                      className="ml-2 p-1 opacity-0 group-hover:opacity-100 transition-opacity text-red-600 hover:bg-red-50 rounded"
+                      title="Disconnect bucket"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={() => setBucketConnectionModalOpen(true)}
+                  className="w-full text-left px-3 py-2 text-sm rounded-md text-blue-600 hover:bg-blue-50 transition-colors flex items-center justify-between"
+                >
+                  <span className={!sidebarCollapsed ? '' : 'hidden'}>+ Add Bucket</span>
+                  <Plus className="w-4 h-4 flex-shrink-0" />
+                </button>
+              </div>
+            )}
+
+            {!bucketConnected && (
+              <button 
+                onClick={() => setBucketConnectionModalOpen(true)}
+                className="text-gray-700 hover:bg-purple-50 hover:text-purple-900 group flex items-center w-full px-3 py-2 text-sm font-medium rounded-md transition-colors"
+              >
+                <HardDrive className="text-gray-400 group-hover:text-purple-500 h-5 w-5 flex-shrink-0" />
+                {!sidebarCollapsed && <span className="ml-3">Connect Bucket</span>}
+              </button>
+            )}
           </div>
         </nav>
 
@@ -548,27 +722,48 @@ const Dashboard = () => {
               </div>
               
               {/* Action buttons */}
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* Upload Files Button */}
                 <button
                   onClick={handleFileUpload}
-                  className="inline-flex items-center px-4 py-2.5 border border-transparent text-sm leading-4 font-semibold rounded-lg text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 shadow-md hover:shadow-lg"
+                  disabled={!bucketConnected || uploadLoading}
+                  className="inline-flex items-center px-5 py-2.5 border-2 border-transparent text-sm leading-4 font-bold rounded-lg text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 shadow-lg hover:shadow-xl"
+                  title="Upload individual files or multiple files at once"
                 >
-                  <UploadCloud className="w-4 h-4 mr-2" />
-                  Upload
+                  <Upload className="w-5 h-5 mr-2" />
+                  <span>Upload Files</span>
                 </button>
+
+                {/* Upload Folder Button */}
+                <button
+                  onClick={handleFolderUpload}
+                  disabled={!bucketConnected || uploadLoading}
+                  className="inline-flex items-center px-5 py-2.5 border-2 border-transparent text-sm leading-4 font-bold rounded-lg text-white bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-all duration-200 shadow-lg hover:shadow-xl"
+                  title="Upload entire folder with folder structure preserved"
+                >
+                  <FolderPlus className="w-5 h-5 mr-2" />
+                  <span>Upload Folder</span>
+                </button>
+
+                {/* New Folder Button */}
                 <button
                   onClick={handleCreateFolder}
-                  className="inline-flex items-center px-4 py-2.5 border-2 border-gray-300 text-sm leading-4 font-semibold rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 shadow-md hover:shadow-lg"
+                  disabled={!bucketConnected}
+                  className="inline-flex items-center px-5 py-2.5 border-2 border-gray-300 text-sm leading-4 font-bold rounded-lg text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-all duration-200 shadow-md hover:shadow-lg"
+                  title="Create a new folder"
                 >
-                  <FolderPlus className="w-4 h-4 mr-2" />
-                  New Folder
+                  <Plus className="w-5 h-5 mr-2" />
+                  <span>New Folder</span>
                 </button>
+
+                {/* My Shares Button */}
                 <button
                   onClick={() => setShareManagementOpen(true)}
-                  className="inline-flex items-center px-4 py-2.5 border-2 border-purple-300 text-sm leading-4 font-semibold rounded-lg text-purple-700 bg-purple-50 hover:bg-purple-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-all duration-200 shadow-md hover:shadow-lg"
+                  className="inline-flex items-center px-5 py-2.5 border-2 border-purple-300 text-sm leading-4 font-bold rounded-lg text-purple-700 bg-purple-50 hover:bg-purple-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-all duration-200 shadow-md hover:shadow-lg"
+                  title="Manage your shared files"
                 >
-                  <Share2 className="w-4 h-4 mr-2" />
-                  My Shares
+                  <Share2 className="w-5 h-5 mr-2" />
+                  <span>My Shares</span>
                 </button>
               </div>
             </div>
