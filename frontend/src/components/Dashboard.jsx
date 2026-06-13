@@ -33,6 +33,7 @@ import FilePreviewViewer from './FilePreviewViewer';
 import BucketConnectionModal from './BucketConnectionModal';
 import CreateBucketModal from './CreateBucketModal';
 import DeleteConfirmationModal from './DeleteConfirmationModal';
+import BucketDeactivateModal from './BucketDeactivateModal';
 import ShareFileModal from './ShareFileModal';
 import ShareManagementPage from './ShareManagementPage';
 
@@ -58,6 +59,9 @@ const Dashboard = () => {
   const [connectedBuckets, setConnectedBuckets] = useState([]);
   const [selectedBucketId, setSelectedBucketId] = useState(null);
   const [showBucketDropdown, setShowBucketDropdown] = useState(false);
+  const [bucketDeactivateModalOpen, setBucketDeactivateModalOpen] = useState(false);
+  const [bucketToDeactivate, setBucketToDeactivate] = useState(null);
+  const [deactivateLoading, setDeactivateLoading] = useState(false);
 
   // Modal states
   const [encryptionModalOpen, setEncryptionModalOpen] = useState(false);
@@ -120,20 +124,29 @@ const Dashboard = () => {
   };
 
   // Disconnect bucket
-  const handleDisconnectBucket = async (bucketId, bucketName) => {
-    if (!window.confirm(`Are you sure you want to disconnect "${bucketName}"?`)) {
-      return;
-    }
+  const handleDisconnectBucket = (bucketId, bucketName) => {
+    setBucketToDeactivate({ id: bucketId, name: bucketName });
+    setBucketDeactivateModalOpen(true);
+  };
+
+  // Confirm deactivate bucket
+  const confirmDeactivateBucket = async () => {
+    if (!bucketToDeactivate) return;
     
     try {
-      await cloudConfigAPI.disconnectBucket(bucketId);
-      toast.success(`"${bucketName}" disconnected successfully`);
+      setDeactivateLoading(true);
+      await cloudConfigAPI.disconnectBucket(bucketToDeactivate.id);
+      toast.success(`"${bucketToDeactivate.name}" deactivated successfully`);
+      setBucketDeactivateModalOpen(false);
+      setBucketToDeactivate(null);
       checkBucketConnection();
       loadFolderContents();
       loadStats();
     } catch (error) {
-      console.error('Disconnect bucket error:', error);
-      toast.error('Failed to disconnect bucket');
+      console.error('Deactivate bucket error:', error);
+      toast.error('Failed to deactivate bucket');
+    } finally {
+      setDeactivateLoading(false);
     }
   };
 
@@ -1129,6 +1142,17 @@ const Dashboard = () => {
       <ShareManagementPage
         isOpen={shareManagementOpen}
         onClose={() => setShareManagementOpen(false)}
+      />
+
+      <BucketDeactivateModal
+        isOpen={bucketDeactivateModalOpen}
+        onClose={() => {
+          setBucketDeactivateModalOpen(false);
+          setBucketToDeactivate(null);
+        }}
+        onConfirm={confirmDeactivateBucket}
+        bucketName={bucketToDeactivate?.name}
+        loading={deactivateLoading}
       />
 
       <FilePreviewViewer
