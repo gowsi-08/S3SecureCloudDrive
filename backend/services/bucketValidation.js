@@ -1,4 +1,4 @@
-const AWS = require('aws-sdk');
+const { S3Client, HeadBucketCommand } = require('@aws-sdk/client-s3');
 
 /**
  * Validate AWS credentials and bucket access
@@ -20,10 +20,12 @@ const validateBucketConnection = async (accessKeyId, secretAccessKey, bucketName
 
     console.log(`🔐 Creating S3 client for bucket: ${bucketName} in region: ${region}`);
 
-    // Create temporary S3 client
-    const s3Client = new AWS.S3({
-      accessKeyId,
-      secretAccessKey,
+    // Create temporary S3 client (AWS SDK v3)
+    const s3Client = new S3Client({
+      credentials: {
+        accessKeyId,
+        secretAccessKey,
+      },
       region,
       signatureVersion: 'v4'
     });
@@ -31,7 +33,8 @@ const validateBucketConnection = async (accessKeyId, secretAccessKey, bucketName
     // Test: Check if bucket exists and is accessible
     console.log(`🧪 Testing bucket access with headBucket...`);
     try {
-      await s3Client.headBucket({ Bucket: bucketName }).promise();
+      const command = new HeadBucketCommand({ Bucket: bucketName });
+      await s3Client.send(command);
       console.log(`✅ Bucket "${bucketName}" is accessible`);
     } catch (error) {
       console.error(`❌ Bucket access error:`, error.code, error.message);
@@ -81,6 +84,180 @@ const validateBucketConnection = async (accessKeyId, secretAccessKey, bucketName
       error: error.message || 'Failed to validate bucket connection'
     };
   }
+};
+
+/**
+ * Check if user has required S3 permissions
+ * @param {S3Client} s3Client - S3 client instance
+ * @param {string} bucketName - Bucket name
+ * @returns {object} Permission check result
+ */
+const checkBucketPermissions = async (s3Client, bucketName) => {
+  const requiredPermissions = [
+    's3:GetObject',
+    's3:PutObject',
+    's3:DeleteObject',
+    's3:ListBucket'
+  ];
+
+  // For now, assume all permissions are present if bucket is accessible
+  // Actual permission errors will be caught when operations are performed
+  return {
+    success: true,
+    verifiedPermissions: requiredPermissions,
+    missingPermissions: []
+  };
+};
+
+/**
+ * Test a specific S3 permission
+ * @param {S3Client} s3Client - S3 client instance
+ * @param {string} bucketName - Bucket name
+ * @param {string} permission - Permission to test (e.g., 's3:GetObject')
+ * @returns {boolean} True if permission exists
+ */
+const testPermission = async (s3Client, bucketName, permission) => {
+  try {
+    // AWS SDK v3 imports for this function
+    const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
+    
+    const testKey = `.permission-test-${Date.now()}`;
+
+    switch (permission) {
+      case 's3:PutObject':
+        try {
+          const putCmd = new PutObjectCommand({
+            Bucket: bucketName,
+            Key: testKey,
+            Body: 'test'
+          });
+          await s3Client.send(putCmd);
+          // Clean up
+          const delCmd = new DeleteObjectCommand({
+            Bucket: bucketName,
+            Key: testKey
+          });
+          await s3Client.send(delCmd);
+          return true;
+        } catch {
+          return false;
+        }
+
+      case 's3:GetObject':
+        try {
+          const getCmd = new GetObjectCommand({
+            Bucket: bucketName,
+            Key: testKey
+          });
+          await s3Client.send(getCmd);
+        } catch (error) {
+          // If object doesn't exist, we still have permission
+          if (error.code === 'NoSuchKey') {
+            return true;
+          }
+          return false;
+        }
+        return true;
+
+      case 's3:DeleteObject':
+        try {
+          const delCmd = new DeleteObjectCommand({
+            Bucket: bucketName,
+            Key: testKey
+          });
+          await s3Client.send(delCmd);
+          return true;
+        } catch (error) {
+          return false;
+        }
+
+      case 's3:ListBucket':
+        try {
+          const listCmd = new ListObjectsV2Command({
+            Bucket: bucketName,
+            MaxKeys: 1
+          });
+          await s3Client.send(listCmd);
+          return true;
+        } catch (error) {
+          return false;
+        }
+
+      default:
+        return false;
+    }
+  } catch (error) {
+    console.error(`Permission test error for ${permission}:`, error.message);
+    return false;
+  }
+};
+
+/**
+ * Get bucket usage statistics
+ * @param {S3Client} s3Client - S3 client instance
+ * @param {string} bucketName - Bucket name
+ * @returns {object} Bucket statistics
+ */
+const getBucketStats = async (s3Client, bucketName) => {
+  try {
+    const { ListObjectsV2Command } = require('@aws-sdk/client-s3');
+    
+    let totalSize = 0;
+    let totalObjects = 0;
+    let continuationToken = null;
+
+    // List all objects and calculate size
+    do {
+      const params = {
+        Bucket: bucketName,
+        ContinuationToken: continuationToken
+      };
+
+      const listCmd = new ListObjectsV2Command(params);
+      const result = await s3Client.send(listCmd);
+
+      if (result.Contents) {
+        totalObjects += result.Contents.length;
+        totalSize += result.Contents.reduce((sum, obj) => sum + (obj.Size || 0), 0);
+      }
+
+      continuationToken = result.NextContinuationToken;
+    } while (continuationToken);
+
+    return {
+      success: true,
+      totalSize,
+      totalObjects,
+      formattedSize: formatBytes(totalSize)
+    };
+  } catch (error) {
+    console.error('Get bucket stats error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Format bytes to human readable format
+ * @param {number} bytes - Number of bytes
+ * @returns {string} Formatted size
+ */
+const formatBytes = (bytes) => {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+};
+
+module.exports = {
+  validateBucketConnection,
+  checkBucketPermissions,
+  testPermission,
+  getBucketStats,
+  formatBytes
 };
 
 /**

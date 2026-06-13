@@ -1,14 +1,15 @@
-const AWS = require('aws-sdk');
+const { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const crypto = require('crypto');
 
-// Configure AWS SDK with your credentials
-AWS.config.update({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+// Configure S3 Client (AWS SDK v3)
+const s3Client = new S3Client({
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
   region: process.env.AWS_REGION
 });
-
-const s3 = new AWS.S3();
 
 // Upload file to S3
 const uploadToS3 = async (buffer, key, contentType) => {
@@ -21,11 +22,13 @@ const uploadToS3 = async (buffer, key, contentType) => {
       ServerSideEncryption: 'AES256'
     };
 
-    const result = await s3.upload(params).promise();
+    const command = new PutObjectCommand(params);
+    const result = await s3Client.send(command);
+    
     return {
       success: true,
-      location: result.Location,
-      key: result.Key,
+      location: `s3://${process.env.AWS_S3_BUCKET}/${key}`,
+      key: key,
       etag: result.ETag
     };
   } catch (error) {
@@ -45,8 +48,23 @@ const downloadFromS3 = async (key) => {
       Key: key
     };
 
-    const result = await s3.getObject(params).promise();
-    return result.Body;
+    const command = new GetObjectCommand(params);
+    const result = await s3Client.send(command);
+    
+    // Convert Body stream to Buffer
+    if (result.Body) {
+      if (Buffer.isBuffer(result.Body)) {
+        return result.Body;
+      }
+      
+      const chunks = [];
+      for await (const chunk of result.Body) {
+        chunks.push(chunk);
+      }
+      return Buffer.concat(chunks);
+    }
+    
+    throw new Error('Empty S3 response body');
   } catch (error) {
     console.error('S3 download error:', error);
     throw new Error(`Failed to download file: ${error.message}`);
@@ -61,7 +79,9 @@ const deleteFromS3 = async (key) => {
       Key: key
     };
 
-    await s3.deleteObject(params).promise();
+    const command = new DeleteObjectCommand(params);
+    await s3Client.send(command);
+    
     return {
       success: true,
       message: 'File deleted successfully'
@@ -84,7 +104,7 @@ const generateS3Key = (userId, fileName, folderId = null) => {
 };
 
 // Get signed URL for temporary access
-const getSignedUrl = (key, expires = 3600) => {
+const getSignedUrlForS3 = async (key, expires = 3600) => {
   try {
     const params = {
       Bucket: process.env.AWS_S3_BUCKET,
@@ -92,7 +112,9 @@ const getSignedUrl = (key, expires = 3600) => {
       Expires: expires
     };
 
-    return s3.getSignedUrl('getObject', params);
+    const command = new GetObjectCommand(params);
+    const url = await getSignedUrl(s3Client, command, { expiresIn: expires });
+    return url;
   } catch (error) {
     console.error('Signed URL error:', error);
     throw new Error(`Failed to generate signed URL: ${error.message}`);
@@ -108,7 +130,8 @@ const validateS3Config = async () => {
       MaxKeys: 1
     };
 
-    await s3.listObjectsV2(params).promise();
+    const command = new ListObjectsV2Command(params);
+    await s3Client.send(command);
     
     return {
       success: true,
@@ -136,7 +159,9 @@ const listFiles = async (prefix = '') => {
       MaxKeys: 100
     };
 
-    const result = await s3.listObjectsV2(params).promise();
+    const command = new ListObjectsV2Command(params);
+    const result = await s3Client.send(command);
+    
     return {
       success: true,
       files: result.Contents || [],
@@ -156,7 +181,7 @@ module.exports = {
   downloadFromS3,
   deleteFromS3,
   generateS3Key,
-  getSignedUrl,
+  getSignedUrlForS3,
   validateS3Config,
   listFiles
 };
