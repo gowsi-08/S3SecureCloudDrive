@@ -5,7 +5,7 @@ const { generateToken, generateRefreshToken } = require('../utils/jwt');
 const register = async (req, res) => {
   try {
     console.log('Registration attempt:', { body: req.body });
-    
+
     const { name, email, password } = req.body;
 
     // Validate required fields
@@ -45,7 +45,7 @@ const register = async (req, res) => {
     const cipher = crypto.createCipheriv('aes-256-cbc', encryptionKey, iv);
     let encryptedPassword = cipher.update(password, 'utf8', 'hex');
     encryptedPassword += cipher.final('hex');
-    
+
     // Combine IV and encrypted password
     const cookieValue = iv.toString('hex') + ':' + encryptedPassword;
 
@@ -82,7 +82,7 @@ const register = async (req, res) => {
       stack: error.stack,
       name: error.name
     });
-    
+
     // Handle specific MongoDB errors
     if (error.code === 11000) {
       return res.status(400).json({
@@ -90,7 +90,7 @@ const register = async (req, res) => {
         message: 'Email already exists'
       });
     }
-    
+
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
@@ -112,7 +112,7 @@ const register = async (req, res) => {
 const login = async (req, res) => {
   try {
     console.log('Login attempt:', { email: req.body.email });
-    
+
     const { email, password } = req.body;
 
     // Validate required fields
@@ -125,7 +125,7 @@ const login = async (req, res) => {
 
     // Find user and include password for comparison
     const user = await User.findOne({ email }).select('+password');
-    
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -161,7 +161,7 @@ const login = async (req, res) => {
     const cipher = crypto.createCipheriv('aes-256-cbc', encryptionKey, iv);
     let encryptedPassword = cipher.update(password, 'utf8', 'hex');
     encryptedPassword += cipher.final('hex');
-    
+
     // Combine IV and encrypted password
     const cookieValue = iv.toString('hex') + ':' + encryptedPassword;
 
@@ -211,7 +211,7 @@ const login = async (req, res) => {
 const getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
-    
+
     res.json({
       success: true,
       data: {
@@ -238,7 +238,7 @@ const getProfile = async (req, res) => {
 const updateProfile = async (req, res) => {
   try {
     const { name } = req.body;
-    
+
     const user = await User.findByIdAndUpdate(
       req.user._id,
       { name },
@@ -305,7 +305,7 @@ const logout = async (req, res) => {
   try {
     // Clear the encrypted password cookie
     res.clearCookie('fileKey');
-    
+
     // In a more advanced implementation, you might want to blacklist the token
     // For now, we'll just send a success response
     res.json({
@@ -350,24 +350,24 @@ const verifyToken = async (req, res) => {
 const decryptPasswordFromCookie = (cookieValue, userId) => {
   try {
     const crypto = require('crypto');
-    
+
     // Split IV and encrypted password
     const parts = cookieValue.split(':');
     if (parts.length !== 2) {
       throw new Error('Invalid cookie format');
     }
-    
+
     const iv = Buffer.from(parts[0], 'hex');
     const encryptedPassword = parts[1];
-    
+
     // Create decryption key
     const encryptionKey = crypto.createHash('sha256').update(process.env.JWT_SECRET + userId.toString()).digest();
-    
+
     // Decrypt
     const decipher = crypto.createDecipheriv('aes-256-cbc', encryptionKey, iv);
     let decryptedPassword = decipher.update(encryptedPassword, 'hex', 'utf8');
     decryptedPassword += decipher.final('utf8');
-    
+
     return decryptedPassword;
   } catch (error) {
     console.error('Error decrypting password from cookie:', error);

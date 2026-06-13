@@ -26,8 +26,9 @@ app.use(helmet({
 
 // CORS configuration
 const allowedOrigins = [
-" https://secureclouddrive.netlify.app/"
- 
+  'https://secureclouddrive.netlify.app',
+  'http://localhost:5173',
+  'http://localhost:3000'
 ];
 
 app.use(cors({
@@ -36,6 +37,7 @@ app.use(cors({
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.warn('CORS blocked origin:', origin);
       callback(new Error('CORS not allowed'));
     }
   },
