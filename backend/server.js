@@ -27,8 +27,7 @@ app.use(helmet({
 // CORS configuration
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://yourdomain.com'] // Replace with your production domain
-    : [ 'http://localhost:5173', 'http://localhost:5174'], // Development origial
+   ['https://secureclouddrive.netlify.app/'], // Development origial
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -121,7 +120,7 @@ app.use((error, req, res, next) => {
 
 // Database connection
 mongoose
-  .connect("mongodb://localhost:27017/s3DriveProject", {
+  .connect(process.env.MONGO_URL, {
    
   })
   .then(async () => {
