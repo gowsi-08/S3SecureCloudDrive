@@ -1,5 +1,10 @@
 const rateLimit = require('express-rate-limit');
 
+// Helper function to get client IP from proxy headers
+const getClientIP = (req) => {
+  return req.ip || req.connection.remoteAddress;
+};
+
 // General rate limiting
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -10,6 +15,8 @@ const generalLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getClientIP,
+  skip: (req) => process.env.NODE_ENV !== 'production' // Disable rate limiting in development
 });
 
 // Strict rate limiting for auth endpoints
@@ -23,6 +30,8 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true, // Don't count successful requests
+  keyGenerator: getClientIP,
+  skip: (req) => process.env.NODE_ENV !== 'production' // Disable rate limiting in development
 });
 
 // Password change rate limiting
@@ -35,6 +44,8 @@ const passwordLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getClientIP,
+  skip: (req) => process.env.NODE_ENV !== 'production' // Disable rate limiting in development
 });
 
 module.exports = {

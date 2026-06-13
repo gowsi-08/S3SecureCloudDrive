@@ -7,6 +7,10 @@ require("dotenv").config();
 
 const app = express();
 
+// Trust proxy - CRITICAL for Render.com deployment
+// Render uses a reverse proxy, so we need to trust X-Forwarded-For headers
+app.set('trust proxy', 1);
+
 // Import security middleware
 const { generalLimiter, authLimiter } = require('./middleware/security');
 
@@ -27,6 +31,8 @@ app.use(helmet({
 // CORS configuration
 const allowedOrigins = [
   'https://secureclouddrive.netlify.app',
+  'https://s3-drive-project.netlify.app',
+  'https://s3secureclouddrive.netlify.app',
   'http://localhost:5173',
   'http://localhost:3000'
 ];
