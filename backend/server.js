@@ -25,9 +25,20 @@ app.use(helmet({
 }));
 
 // CORS configuration
+const allowedOrigins = [
+" https://secureclouddrive.netlify.app/"
+ 
+];
+
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-   ['https://secureclouddrive.netlify.app/'], // Development origial
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS not allowed'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -49,7 +60,19 @@ app.get("/", (req, res) => {
     success: true,
     message: "Secure Cloud Drive API is running",
     version: "1.0.0",
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    corsEnabled: true
+  });
+});
+
+// Detailed health check for debugging
+app.get("/api/health", (req, res) => {
+  res.json({
+    success: true,
+    message: "API is healthy",
+    timestamp: new Date().toISOString(),
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 

@@ -36,21 +36,37 @@ export const AuthProvider = ({ children }) => {
       const token = localStorage.getItem('token');
       const savedUser = localStorage.getItem('user');
 
+      console.log('🔐 AuthContext: Starting token verification...', { hasToken: !!token, hasUser: !!savedUser });
+
       if (token && savedUser) {
         try {
-          // Verify token is still valid
-          const response = await authAPI.verifyToken();
+          // Create a promise that rejects after 5 seconds
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Token verification timeout')), 5000)
+          );
+          
+          // Race between API call and timeout
+          const verifyPromise = authAPI.verifyToken();
+          const response = await Promise.race([verifyPromise, timeoutPromise]);
+          
+          console.log('✅ Token verification successful');
           if (response.data.success) {
             dispatch({ type: 'SET_USER', payload: JSON.parse(savedUser) });
           } else {
+            console.warn('⚠️ Token verification returned false');
             localStorage.removeItem('token');
             localStorage.removeItem('user');
           }
         } catch (error) {
+          console.error('❌ Token verification failed:', error.message);
           localStorage.removeItem('token');
           localStorage.removeItem('user');
         }
+      } else {
+        console.log('ℹ️ No token found, user will see login screen');
       }
+      
+      console.log('🔐 AuthContext: Setting loading to false');
       dispatch({ type: 'SET_LOADING', payload: false });
     };
 
