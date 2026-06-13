@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 
 const BucketDeactivateModal = ({ 
   isOpen, 
@@ -36,13 +36,6 @@ const BucketDeactivateModal = ({
                 </p>
               </div>
             </div>
-            <button
-              onClick={onClose}
-              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              disabled={loading}
-            >
-              <X className="w-5 h-5" />
-            </button>
           </div>
 
           {/* Bucket Details */}
