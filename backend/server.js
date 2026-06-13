@@ -7,6 +7,23 @@ require("dotenv").config();
 
 const app = express();
 
+// Import logging middleware
+const { 
+  requestLogger, 
+  errorLogger, 
+  setupUncaughtExceptionHandler,
+  setupUnhandledRejectionHandler,
+  cleanupOldLogs,
+  getRecentLogs
+} = require('./middleware/logging');
+
+// Setup error handlers
+setupUncaughtExceptionHandler();
+setupUnhandledRejectionHandler();
+
+// Clean up old logs on startup
+cleanupOldLogs();
+
 // Trust proxy - CRITICAL for Render.com deployment
 // Render uses a reverse proxy, so we need to trust X-Forwarded-For headers
 app.set('trust proxy', 1);
@@ -59,6 +76,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Cookie parsing middleware
 app.use(cookieParser());
 
+// Request logging middleware - LOG ALL REQUESTS
+app.use(requestLogger);
+
 // Apply rate limiting
 app.use(generalLimiter);
 
@@ -101,7 +121,29 @@ app.use((req, res) => {
   });
 });
 
-// Global error handler
+// Logs API endpoint (protected - only for debugging)
+app.get('/api/logs/recent', (req, res) => {
+  try {
+    const lines = parseInt(req.query.lines) || 100;
+    const logs = getRecentLogs(lines);
+    res.json({
+      success: true,
+      count: logs.length,
+      logs
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch logs',
+      error: error.message
+    });
+  }
+});
+
+// Global error handler - LOG ALL ERRORS
+app.use(errorLogger);
+
+// Custom error handler for detailed error responses
 app.use((error, req, res, next) => {
   console.error('Global error:', error);
   
