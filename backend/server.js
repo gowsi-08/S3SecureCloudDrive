@@ -113,14 +113,6 @@ app.use('/api/secure-delete', secureDeleteRoutes);
 app.use('/api/cloud-config', cloudConfigRoutes);
 app.use('/api/shared-files', sharedFilesRoutes);
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found'
-  });
-});
-
 // Logs API endpoint (protected - only for debugging)
 app.get('/api/logs/recent', (req, res) => {
   try {
@@ -138,6 +130,15 @@ app.get('/api/logs/recent', (req, res) => {
       error: error.message
     });
   }
+});
+
+// 404 handler (MUST be after all route definitions)
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found',
+    path: req.path
+  });
 });
 
 // Global error handler - LOG ALL ERRORS
