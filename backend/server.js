@@ -31,14 +31,64 @@ app.set('trust proxy', 1);
 // Import security middleware
 const { generalLimiter, authLimiter } = require('./middleware/security');
 
-// Import routes
-const authRoutes = require('./routes/auth');
-const fileRoutes = require('./routes/files');
-const folderRoutes = require('./routes/folders');
-const secureFileRoutes = require('./routes/secureFiles');
-const secureDeleteRoutes = require('./routes/secureDelete');
-const cloudConfigRoutes = require('./routes/cloudConfig');
-const sharedFilesRoutes = require('./routes/sharedFiles');
+// Import routes with error handling
+let authRoutes, fileRoutes, folderRoutes, secureFileRoutes, secureDeleteRoutes, cloudConfigRoutes, sharedFilesRoutes;
+
+try {
+  authRoutes = require('./routes/auth');
+  console.log('✅ Loaded: auth routes');
+} catch (error) {
+  console.error('❌ Failed to load auth routes:', error.message);
+  authRoutes = express.Router();
+}
+
+try {
+  fileRoutes = require('./routes/files');
+  console.log('✅ Loaded: file routes');
+} catch (error) {
+  console.error('❌ Failed to load file routes:', error.message);
+  fileRoutes = express.Router();
+}
+
+try {
+  folderRoutes = require('./routes/folders');
+  console.log('✅ Loaded: folder routes');
+} catch (error) {
+  console.error('❌ Failed to load folder routes:', error.message);
+  folderRoutes = express.Router();
+}
+
+try {
+  secureFileRoutes = require('./routes/secureFiles');
+  console.log('✅ Loaded: secure file routes');
+} catch (error) {
+  console.error('❌ Failed to load secure file routes:', error.message);
+  secureFileRoutes = express.Router();
+}
+
+try {
+  secureDeleteRoutes = require('./routes/secureDelete');
+  console.log('✅ Loaded: secure delete routes');
+} catch (error) {
+  console.error('❌ Failed to load secure delete routes:', error.message);
+  secureDeleteRoutes = express.Router();
+}
+
+try {
+  cloudConfigRoutes = require('./routes/cloudConfig');
+  console.log('✅ Loaded: cloud config routes');
+} catch (error) {
+  console.error('❌ Failed to load cloud config routes:', error.message);
+  cloudConfigRoutes = express.Router();
+}
+
+try {
+  sharedFilesRoutes = require('./routes/sharedFiles');
+  console.log('✅ Loaded: shared files routes');
+} catch (error) {
+  console.error('❌ Failed to load shared files routes:', error.message);
+  sharedFilesRoutes = express.Router();
+}
 
 // Security middleware
 app.use(helmet({
@@ -77,7 +127,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
 // Request logging middleware - LOG ALL REQUESTS
-app.use(requestLogger);
+// Temporarily disabled for debugging
+// app.use(requestLogger);
 
 // Apply rate limiting
 app.use(generalLimiter);
@@ -104,14 +155,32 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// Simple test route to verify routing works
+app.get("/api/test", (req, res) => {
+  console.log('Test route hit!');
+  res.json({
+    success: true,
+    message: "Test route working!",
+    path: req.path
+  });
+});
+
 // API routes
+console.log('🔧 Mounting API routes...');
 app.use('/api/auth', authLimiter, authRoutes);
+console.log('✅ Mounted: /api/auth');
 app.use('/api/files', fileRoutes);
+console.log('✅ Mounted: /api/files');
 app.use('/api/folders', folderRoutes);
+console.log('✅ Mounted: /api/folders');
 app.use('/api/secure-files', secureFileRoutes);
+console.log('✅ Mounted: /api/secure-files');
 app.use('/api/secure-delete', secureDeleteRoutes);
+console.log('✅ Mounted: /api/secure-delete');
 app.use('/api/cloud-config', cloudConfigRoutes);
+console.log('✅ Mounted: /api/cloud-config');
 app.use('/api/shared-files', sharedFilesRoutes);
+console.log('✅ Mounted: /api/shared-files');
 
 // Logs API endpoint (protected - only for debugging)
 app.get('/api/logs/recent', (req, res) => {
@@ -134,15 +203,18 @@ app.get('/api/logs/recent', (req, res) => {
 
 // 404 handler (MUST be after all route definitions)
 app.use((req, res) => {
+  console.log('404 - Route not found:', req.method, req.path);
   res.status(404).json({
     success: false,
     message: 'Route not found',
-    path: req.path
+    path: req.path,
+    method: req.method
   });
 });
 
 // Global error handler - LOG ALL ERRORS
-app.use(errorLogger);
+// Temporarily disabled for debugging
+// app.use(errorLogger);
 
 // Custom error handler for detailed error responses
 app.use((error, req, res, next) => {
